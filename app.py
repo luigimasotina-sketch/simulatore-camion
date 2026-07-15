@@ -69,6 +69,3 @@ Questa modifica fa in modo che anche la "Distinta di Carico" in basso diventi pi
 # ... existing code ...
 ```
 
-Aggiorna i file su GitHub con questi due blocchi. Adesso se provi ad aggiungere un "Pallet EPAL Standard" (che ha un'altezza di soli 15 cm ed è sovrapponibile) per due volte di fila, vedrai che l'algoritmo non occuperà nuovo spazio sul pianale, ma lo "impilerà" virtualmente su quello precedente finché non tocca il tetto del camion (270 cm).
-
-Testalo e fammi sapere se ora si comporta esattamente come farebbe un mulettista vero!
