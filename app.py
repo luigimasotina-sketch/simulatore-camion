@@ -7,7 +7,6 @@ import math
 st.set_page_config(page_title="Simulatore di Carico Aziendale", layout="wide")
 
 # --- CSS STYLING ---
-# Ingrandiamo i menu a tendina e compattiamo la vista
 st.markdown("""
 <style>
     .stSelectbox label { font-size: 1.2rem; font-weight: bold; }
@@ -17,12 +16,10 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- INIZIALIZZAZIONE DATI (ANAGRAFICHE DI BASE) E MEMORIA ---
+# --- INIZIALIZZAZIONE DATI (ANAGRAFICHE DI BASE) ---
+# Ripristino di log_messaggi per evitare il crash
 if 'log_messaggi' not in st.session_state:
     st.session_state.log_messaggi = []
-    
-if 'carico' not in st.session_state:
-    st.session_state.carico = []
 
 if 'mezzi' not in st.session_state:
     st.session_state.mezzi = pd.DataFrame([
@@ -53,22 +50,13 @@ if 'oggetti' not in st.session_state:
         {"Nome": "B300 a vista", "L": 249, "P": 157, "A": 186, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": False},
         {"Nome": "B260", "L": 234, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
         {"Nome": "B260 COMBO", "L": 325, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
+        {"Nome": "Pallet Custom", "L": 120, "P": 80, "A": 100, "Peso": 50, "Sovrapponibile": False, "Ruotabile": True}
     ])
 
-# --- MOTORE DI CALCOLO (Maximal Rectangles) ---
-class Rect:
-    def __init__(self, x, y, w, d):
-        self.x = x
-        self.y = y
-        self.w = w
-        self.d = d
+if 'carico' not in st.session_state:
+    st.session_state.carico = []
 
-    def intersects(self, other):
-        return not (self.x >= other.x + other.w or 
-                    self.x + self.w <= other.x or 
-                    self.y >= other.y + other.d or 
-                    self.y + self.d <= other.y)
-
+# --- NUOVO MOTORE DI CALCOLO (Shelf Algorithm - Approccio Logistico) ---
 def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=0):
     oggetti_raggruppati = {}
     
@@ -93,106 +81,106 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
     if peso_totale > mezzo['Portata']: 
         return False, [], []
 
-    free_rectangles = [Rect(0, 0, mezzo['Lunghezza'], mezzo['Larghezza'])]
     placed_blocks = []
     
-    # Ordiniamo gli oggetti dal più grande al più piccolo per ottimizzare gli incastri
-    items.sort(key=lambda x: x['dati']['L'] * x['dati']['P'], reverse=True)
+    # Ordinamento: Prima i più ingombranti (area maggiore)
+    items.sort(key=lambda x: max(x['dati']['L'], x['dati']['P']) * min(x['dati']['L'], x['dati']['P']), reverse=True)
+
+    current_x = 0  # Profondità (Lunghezza camion)
+    current_y = 0  # Larghezza (Lato portelloni)
+    shelf_depth = 0 # Profondità della riga corrente
     
     for item in items:
         qta_rimasta = item['qta']
         dati = item['dati']
         
         while qta_rimasta > 0:
-            best_rect_idx = -1
-            best_l, best_p = dati['L'], dati['P']
-            
-            # Punteggio 3D: (Coord Y, Coord X, Tie-breaker rotazione). 
-            # Priorità: 1. Appoggiarsi in BASSO (Y) 2. Appoggiarsi a SINISTRA (X).
-            # Tie-breaker: Preferire l'orientamento che spinge il lato PIÙ LUNGO in profondità (Y) per mantenere le righe dritte.
-            best_score = (float('inf'), float('inf'), float('inf')) 
-            
-            for i, rect in enumerate(free_rectangles):
-                # Check orientamento dritto
-                if rect.w >= dati['L'] and rect.d >= dati['P']:
-                    score_dritto = (rect.y, rect.x, -dati['P'])
-                    
-                    if score_dritto < best_score:
-                        best_score = score_dritto
-                        best_rect_idx = i
-                        best_l, best_p = dati['L'], dati['P']
-                        
-                # Check orientamento ruotato
-                if dati.get('Ruotabile', True) and rect.w >= dati['P'] and rect.d >= dati['L']:
-                    score_ruotato = (rect.y, rect.x, -dati['L'])
-                    
-                    if score_ruotato < best_score:
-                        best_score = score_ruotato
-                        best_rect_idx = i
-                        best_l, best_p = dati['P'], dati['L']
-                    
-            if best_rect_idx == -1:
-                return False, [], [] 
-                
-            selected_rect = free_rectangles[best_rect_idx]
-            
+            # Calcolo impilabilità
             qta_impilabile = 1
             if dati.get('Sovrapponibile', False):
                 qta_impilabile = min(qta_rimasta, math.floor(mezzo['Altezza'] / dati['A']))
+            if qta_impilabile == 0: return False, [], []
+            
+            # Scelta Rotazione (Logica: Mettili nel modo che ne fa stare di più in una riga orizzontale)
+            l, p = dati['L'], dati['P']
+            ruotabile = dati.get('Ruotabile', True)
+            
+            best_l, best_p = l, p
+            
+            if ruotabile:
+                # Caso Bilico: Se girarlo (lato corto sulla Y) mi permette di chiudere la riga (es. 240cm -> 80+80+80), preferiscilo.
+                spazio_rimanente_largo = mezzo['Larghezza'] - current_y
                 
-            if qta_impilabile == 0: 
-                return False, [], [] 
+                # Se entra girato ma non dritto
+                if p <= spazio_rimanente_largo and l > spazio_rimanente_largo:
+                    best_l, best_p = p, l
+                # Se entrano entrambi, scegli quello che lascia il "resto" minore, massimizzando l'incastro
+                elif l <= spazio_rimanente_largo and p <= spazio_rimanente_largo:
+                    # Incastro "umano": se è un EPAL (120x80) su un 240, metterne 3 (da 80) è meglio di 2 (da 120)
+                    resto_dritto = spazio_rimanente_largo % l
+                    resto_girato = spazio_rimanente_largo % p
+                    
+                    if resto_girato < resto_dritto:
+                         best_l, best_p = p, l
+                    elif resto_girato == resto_dritto:
+                        # Tie-breaker: se il resto è uguale, metti il lato corto lungo la X (profondità) per risparmiare metri lineari
+                        if p < l:
+                            best_l, best_p = p, l
+                else:
+                    pass # Non entra in nessun modo nella riga corrente, gestito sotto
 
-            new_block = Rect(selected_rect.x, selected_rect.y, best_l, best_p)
+            # Controllo: Se non entra in questa riga, vado a capo
+            if current_y + best_p > mezzo['Larghezza']:
+                current_x += shelf_depth
+                current_y = 0
+                shelf_depth = 0
+                
+                # Ricalcola la rotazione migliore per l'inizio della nuova riga
+                best_l, best_p = l, p
+                if ruotabile:
+                    resto_dritto = mezzo['Larghezza'] % l
+                    resto_girato = mezzo['Larghezza'] % p
+                    if resto_girato < resto_dritto or (resto_girato == resto_dritto and p < l):
+                        best_l, best_p = p, l
+
+            # Controllo Finale: Sbatto contro le porte posteriori?
+            if current_x + best_l > mezzo['Lunghezza']:
+                # Ultima speranza: Proviamo l'altra rotazione per vedere se salva il carico all'ultimo millimetro
+                if ruotabile:
+                    alt_l, alt_p = (p, l) if (best_l, best_p) == (l, p) else (l, p)
+                    if current_x + alt_l <= mezzo['Lunghezza'] and current_y + alt_p <= mezzo['Larghezza']:
+                         best_l, best_p = alt_l, alt_p
+                    else:
+                        return False, [], [] # Definitivamente pieno
+                else:
+                    return False, [], []
+
+            # Piazza il blocco
             placed_blocks.append({
                 'Nome': dati['Nome'],
-                'x': new_block.x, 'y': new_block.y, 'z': 0,
-                'l': new_block.w, 'p': new_block.d, 'a': dati['A'] * qta_impilabile,
+                'x': current_x, 'y': current_y, 'z': 0,
+                'l': best_l, 'p': best_p, 'a': dati['A'] * qta_impilabile,
                 'qta_stack': qta_impilabile
             })
+            
+            # Aggiorna i cursori
+            current_y += best_p
+            shelf_depth = max(shelf_depth, best_l)
             qta_rimasta -= qta_impilabile
-            
-            # 1. Genera nuovi rettangoli massimali tagliando quelli che si sovrappongono
-            new_free_rectangles = []
-            for rect in free_rectangles:
-                if not rect.intersects(new_block):
-                    new_free_rectangles.append(rect)
-                else:
-                    if new_block.x > rect.x:
-                        new_free_rectangles.append(Rect(rect.x, rect.y, new_block.x - rect.x, rect.d))
-                    if new_block.x + new_block.w < rect.x + rect.w:
-                        new_free_rectangles.append(Rect(new_block.x + new_block.w, rect.y, rect.x + rect.w - (new_block.x + new_block.w), rect.d))
-                    if new_block.y > rect.y:
-                        new_free_rectangles.append(Rect(rect.x, rect.y, rect.w, new_block.y - rect.y))
-                    if new_block.y + new_block.d < rect.y + rect.d:
-                        new_free_rectangles.append(Rect(rect.x, new_block.y + new_block.d, rect.w, rect.y + rect.d - (new_block.y + new_block.d)))
-            
-            # 2. Rimuovi rettangoli degeneri (dimensione 0)
-            new_free_rectangles = [r for r in new_free_rectangles if r.w > 0 and r.d > 0]
-            
-            # 3. Rimuovi rettangoli completamente contenuti in altri (ottimizzazione memoria)
-            final_free_rectangles = []
-            for r1 in new_free_rectangles:
-                is_contained = False
-                for r2 in new_free_rectangles:
-                    if r1 != r2 and r1.x >= r2.x and r1.y >= r2.y and r1.x + r1.w <= r2.x + r2.w and r1.y + r1.d <= r2.y + r2.d:
-                        is_contained = True
-                        break
-                if not is_contained:
-                    final_free_rectangles.append(r1)
-                    
-            free_rectangles = final_free_rectangles
 
+    # Dummy class mapping per retrocompatibilità (non più usata per calcolo epal ma richiesta dall'interfaccia)
     class FSCompat:
         def __init__(self, w, d):
             self.w = w
             self.d = d
             
-    spazi_compatibili = [FSCompat(r.w, r.d) for r in free_rectangles]
+    # Calcolo molto approssimativo dello spazio finale rimasto
+    spazio_rimanente_x = mezzo['Lunghezza'] - (current_x + shelf_depth)
+    spazi_compatibili = [FSCompat(spazio_rimanente_x, mezzo['Larghezza'])]
+    
     return True, placed_blocks, spazi_compatibili
 
 def verifica_spazio(mezzo, carico_attuale, nuovo_oggetto, qta_richiesta):
-    # Logica di Saturazione progressiva: provo a metterli tutti, sennò scalo
     for q in range(qta_richiesta, 0, -1):
         ok, _, _ = simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto, q)
         if ok:
@@ -225,7 +213,6 @@ else:
     mezzo_selezionato = st.selectbox("1. Seleziona il Mezzo", nomi_mezzi, label_visibility="collapsed")
     dati_mezzo = st.session_state.mezzi[st.session_state.mezzi["Nome"] == mezzo_selezionato].iloc[0].to_dict()
 
-    # APPLICAZIONE MARGINI DI SICUREZZA (10cm Lunghezza, 15cm Altezza)
     dati_mezzo_effettivo = dati_mezzo.copy()
     dati_mezzo_effettivo['Lunghezza'] = max(0, dati_mezzo['Lunghezza'] - 10)
     dati_mezzo_effettivo['Altezza'] = max(0, dati_mezzo['Altezza'] - 15)
@@ -330,7 +317,7 @@ else:
         c1, c2, c3 = st.columns(3)
         c1.metric("Saturazione Peso", f"{perc_peso}%", f"{dati_mezzo_effettivo['Portata'] - peso_attuale} kg liberi", delta_color="normal")
         c2.metric("Saturazione Pianale", f"{perc_spazio}%", f"{(area_totale - area_occupata):.1f} m² liberi", delta_color="normal")
-        c3.metric("Spazi EPAL Certi", f"{epal_residui} plt")
+        c3.metric("Spazi EPAL Certi (Stima)", f"{epal_residui} plt")
         
         st.progress(min(perc_peso, 100), text="Grafico Peso")
         st.progress(min(perc_spazio, 100), text="Grafico Spazio")
