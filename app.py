@@ -52,8 +52,7 @@ if 'oggetti' not in st.session_state:
 
 if 'carico' not in st.session_state:
     st.session_state.carico = []
-if 'log_messaggi' not in st.session_state:
-    st.session_state.log_messaggi = []
+
 # --- MOTORE DI CALCOLO (Maximal Rectangles) ---
 class Rect:
     def __init__(self, x, y, w, d):
@@ -104,15 +103,13 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
         while qta_rimasta > 0:
             best_rect_idx = -1
             best_l, best_p = dati['L'], dati['P']
-            # Punteggio: (Coordinata Y, Coordinata X, Spazio sprecato). Priorità assoluta a Y e X.
-            best_score = (float('inf'), float('inf'), float('inf')) 
+            # Punteggio: (Coordinata X, Coordinata Y). Priorità assoluta ad appoggiarsi a SINISTRA, poi IN BASSO.
+            best_score = (float('inf'), float('inf')) 
             
             for i, rect in enumerate(free_rectangles):
                 # Check orientamento dritto
                 if rect.w >= dati['L'] and rect.d >= dati['P']:
-                    leftover_w = rect.w - dati['L']
-                    leftover_d = rect.d - dati['P']
-                    score_dritto = (rect.y, rect.x, min(leftover_w, leftover_d))
+                    score_dritto = (rect.x, rect.y)
                     
                     if score_dritto < best_score:
                         best_score = score_dritto
@@ -121,9 +118,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                         
                 # Check orientamento ruotato
                 if dati.get('Ruotabile', True) and rect.w >= dati['P'] and rect.d >= dati['L']:
-                    leftover_w = rect.w - dati['P']
-                    leftover_d = rect.d - dati['L']
-                    score_ruotato = (rect.y, rect.x, min(leftover_w, leftover_d))
+                    score_ruotato = (rect.x, rect.y)
                     
                     if score_ruotato < best_score:
                         best_score = score_ruotato
@@ -409,3 +404,4 @@ else:
             if st.button("🗑️ Svuota Camion", type="secondary"):
                 st.session_state.carico = []
                 st.rerun()
+
