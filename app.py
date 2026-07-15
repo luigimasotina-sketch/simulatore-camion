@@ -68,7 +68,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
     # Controllo Peso Totale
     peso_totale = sum(i['dati']['Peso'] * i['qta'] for i in items)
     if peso_totale > mezzo['Portata']: 
-        return False, []
+        return False, [], []
 
     # 2. Algoritmo di piazzamento (Guillotine Split)
     free_spaces = [FreeSpace(0, 0, mezzo['Lunghezza'], mezzo['Larghezza'])]
@@ -99,7 +99,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                     break
                     
             if best_space_idx == -1:
-                return False, [] # Spazio a terra finito
+                return False, [], [] # Spazio a terra finito
                 
             space = free_spaces.pop(best_space_idx)
             
@@ -109,7 +109,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 qta_impilabile = min(qta_rimasta, math.floor(mezzo['Altezza'] / dati['A']))
                 
             if qta_impilabile == 0: 
-                return False, [] # Non ci sta per l'altezza
+                return False, [], [] # Non ci sta per l'altezza
 
             # Aggiungi blocco piazzato
             placed_blocks.append({
@@ -132,12 +132,12 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
             # Riordina spazi liberi: si riempie dal fondo del camion (X minore)
             free_spaces.sort(key=lambda s: (s.x, s.y))
             
-    return True, placed_blocks
+    return True, placed_blocks, free_spaces
 
 def verifica_spazio(mezzo, carico_attuale, nuovo_oggetto, qta_richiesta):
     # Logica di Saturazione progressiva: provo a metterli tutti, sennò scalo
     for q in range(qta_richiesta, 0, -1):
-        ok, _ = simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto, q)
+        ok, _, _ = simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto, q)
         if ok:
             if q == qta_richiesta:
                 return q, "OK"
@@ -168,11 +168,16 @@ else:
     mezzo_selezionato = st.selectbox("1. Seleziona il Mezzo", nomi_mezzi, label_visibility="collapsed")
     dati_mezzo = st.session_state.mezzi[st.session_state.mezzi["Nome"] == mezzo_selezionato].iloc[0].to_dict()
 
+    # APPLICAZIONE MARGINI DI SICUREZZA (10cm Lunghezza, 15cm Altezza)
+    dati_mezzo_effettivo = dati_mezzo.copy()
+    dati_mezzo_effettivo['Lunghezza'] = max(0, dati_mezzo['Lunghezza'] - 10)
+    dati_mezzo_effettivo['Altezza'] = max(0, dati_mezzo['Altezza'] - 15)
+
     col_m1, col_m2, col_m3, col_m4 = st.columns(4)
-    col_m1.metric("Lunghezza (L)", f"{dati_mezzo['Lunghezza']} cm")
-    col_m2.metric("Larghezza (P)", f"{dati_mezzo['Larghezza']} cm")
-    col_m3.metric("Altezza (A)", f"{dati_mezzo['Altezza']} cm")
-    col_m4.metric("Portata Max", f"{dati_mezzo['Portata']} kg")
+    col_m1.metric("Lunghezza Utile", f"{dati_mezzo_effettivo['Lunghezza']} cm", f"(-10cm margine)", delta_color="off")
+    col_m2.metric("Larghezza (P)", f"{dati_mezzo_effettivo['Larghezza']} cm")
+    col_m3.metric("Altezza Utile", f"{dati_mezzo_effettivo['Altezza']} cm", f"(-15cm margine)", delta_color="off")
+    col_m4.metric("Portata Max", f"{dati_mezzo_effettivo['Portata']} kg")
     
     st.divider()
 
@@ -214,7 +219,7 @@ else:
         if st.button("➕ Aggiungi al Carico", type="primary", use_container_width=True):
             nuovo_oggetto_dict = {"Nome": nome_da_aggiungere, "L": L, "P": P, "A": A, "Peso": Peso, "Sovrapponibile": sovr, "Ruotabile": ruot}
             
-            qta_inseribile, msg = verifica_spazio(dati_mezzo, st.session_state.carico, nuovo_oggetto_dict, quantita)
+            qta_inseribile, msg = verifica_spazio(dati_mezzo_effettivo, st.session_state.carico, nuovo_oggetto_dict, quantita)
             
             if qta_inseribile > 0:
                 # RAGGRUPPAMENTO NELLA LISTA VISIVA (Evita doppioni in distinta)
@@ -253,20 +258,26 @@ else:
         st.session_state.log_messaggi = [] # Svuota log
 
         # Riesegue il calcolo per avere i dati aggiornati per la mappa
-        _, blocchi_piazzati = simula_carico_completo(dati_mezzo, st.session_state.carico)
+        _, blocchi_piazzati, spazi_liberi = simula_carico_completo(dati_mezzo_effettivo, st.session_state.carico)
         
         peso_attuale = sum(c['Peso'] * c['Quantità'] for c in st.session_state.carico)
         area_occupata = sum((b['l']/100) * (b['p']/100) for b in blocchi_piazzati)
-        area_totale = (dati_mezzo['Lunghezza']/100) * (dati_mezzo['Larghezza']/100)
+        area_totale = (dati_mezzo_effettivo['Lunghezza']/100) * (dati_mezzo_effettivo['Larghezza']/100)
         
-        perc_peso = int((peso_attuale / dati_mezzo['Portata']) * 100) if dati_mezzo['Portata'] else 0
+        perc_peso = int((peso_attuale / dati_mezzo_effettivo['Portata']) * 100) if dati_mezzo_effettivo['Portata'] else 0
         perc_spazio = int((area_occupata / area_totale) * 100) if area_totale else 0
-        epal_residui = math.floor((area_totale - area_occupata) / 0.96)
+        
+        # Calcolo geometrico reale degli EPAL residui basato sugli spazi liberi
+        epal_residui = 0
+        for space in spazi_liberi:
+            epal_dritti = math.floor(space.w / 120) * math.floor(space.d / 80)
+            epal_girati = math.floor(space.w / 80) * math.floor(space.d / 120)
+            epal_residui += max(epal_dritti, epal_girati)
         
         c1, c2, c3 = st.columns(3)
-        c1.metric("Saturazione Peso", f"{perc_peso}%", f"{dati_mezzo['Portata'] - peso_attuale} kg liberi", delta_color="normal")
+        c1.metric("Saturazione Peso", f"{perc_peso}%", f"{dati_mezzo_effettivo['Portata'] - peso_attuale} kg liberi", delta_color="normal")
         c2.metric("Saturazione Pianale", f"{perc_spazio}%", f"{(area_totale - area_occupata):.1f} m² liberi", delta_color="normal")
-        c3.metric("Spazio Residuo EPAL", f"{epal_residui} plt")
+        c3.metric("Spazi EPAL Certi", f"{epal_residui} plt")
         
         st.progress(min(perc_peso, 100), text="Grafico Peso")
         st.progress(min(perc_spazio, 100), text="Grafico Spazio")
@@ -277,8 +288,8 @@ else:
         
         # Disegna il pianale (X = Lunghezza, Y = Larghezza) - Scale 1:1 per non deformarlo
         fig.add_trace(go.Scatter(
-            x=[0, dati_mezzo['Lunghezza'], dati_mezzo['Lunghezza'], 0, 0],
-            y=[0, 0, dati_mezzo['Larghezza'], dati_mezzo['Larghezza'], 0],
+            x=[0, dati_mezzo_effettivo['Lunghezza'], dati_mezzo_effettivo['Lunghezza'], 0, 0],
+            y=[0, 0, dati_mezzo_effettivo['Larghezza'], dati_mezzo_effettivo['Larghezza'], 0],
             fill="toself",
             fillcolor="lightgray",
             line=dict(color="black", width=2),
@@ -317,8 +328,8 @@ else:
             ))
             
         fig.update_layout(
-            xaxis=dict(range=[-10, dati_mezzo['Lunghezza']+10], showgrid=False, zeroline=False, visible=False),
-            yaxis=dict(range=[-10, dati_mezzo['Larghezza']+10], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
+            xaxis=dict(range=[-10, dati_mezzo_effettivo['Lunghezza']+10], showgrid=False, zeroline=False, visible=False),
+            yaxis=dict(range=[-10, dati_mezzo_effettivo['Larghezza']+10], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
             margin=dict(l=0, r=0, t=10, b=0),
             height=300, # Altezza compatta
             plot_bgcolor="white",
