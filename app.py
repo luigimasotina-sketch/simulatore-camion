@@ -17,7 +17,13 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- INIZIALIZZAZIONE DATI (ANAGRAFICHE DI BASE) ---
+# --- INIZIALIZZAZIONE DATI (ANAGRAFICHE DI BASE) E MEMORIA ---
+if 'log_messaggi' not in st.session_state:
+    st.session_state.log_messaggi = []
+    
+if 'carico' not in st.session_state:
+    st.session_state.carico = []
+
 if 'mezzi' not in st.session_state:
     st.session_state.mezzi = pd.DataFrame([
         {"Nome": "Bilico 13.6m", "Lunghezza": 1360, "Larghezza": 240, "Altezza": 270, "Portata": 24000},
@@ -47,11 +53,7 @@ if 'oggetti' not in st.session_state:
         {"Nome": "B300 a vista", "L": 249, "P": 157, "A": 186, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": False},
         {"Nome": "B260", "L": 234, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
         {"Nome": "B260 COMBO", "L": 325, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
-        
     ])
-
-if 'carico' not in st.session_state:
-    st.session_state.carico = []
 
 # --- MOTORE DI CALCOLO (Maximal Rectangles) ---
 class Rect:
@@ -94,6 +96,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
     free_rectangles = [Rect(0, 0, mezzo['Lunghezza'], mezzo['Larghezza'])]
     placed_blocks = []
     
+    # Ordiniamo gli oggetti dal più grande al più piccolo per ottimizzare gli incastri
     items.sort(key=lambda x: x['dati']['L'] * x['dati']['P'], reverse=True)
     
     for item in items:
@@ -103,13 +106,16 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
         while qta_rimasta > 0:
             best_rect_idx = -1
             best_l, best_p = dati['L'], dati['P']
-            # Punteggio: (Coordinata X, Coordinata Y). Priorità assoluta ad appoggiarsi a SINISTRA, poi IN BASSO.
-            best_score = (float('inf'), float('inf')) 
+            
+            # Punteggio 3D: (Coord Y, Coord X, Tie-breaker rotazione). 
+            # Priorità: 1. Appoggiarsi in BASSO (Y) 2. Appoggiarsi a SINISTRA (X).
+            # Tie-breaker: Preferire l'orientamento che spinge il lato PIÙ LUNGO in profondità (Y) per mantenere le righe dritte.
+            best_score = (float('inf'), float('inf'), float('inf')) 
             
             for i, rect in enumerate(free_rectangles):
                 # Check orientamento dritto
                 if rect.w >= dati['L'] and rect.d >= dati['P']:
-                    score_dritto = (rect.x, rect.y)
+                    score_dritto = (rect.y, rect.x, -dati['P'])
                     
                     if score_dritto < best_score:
                         best_score = score_dritto
@@ -118,7 +124,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                         
                 # Check orientamento ruotato
                 if dati.get('Ruotabile', True) and rect.w >= dati['P'] and rect.d >= dati['L']:
-                    score_ruotato = (rect.x, rect.y)
+                    score_ruotato = (rect.y, rect.x, -dati['L'])
                     
                     if score_ruotato < best_score:
                         best_score = score_ruotato
@@ -146,13 +152,12 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
             })
             qta_rimasta -= qta_impilabile
             
-            # 1. Generate new maximal rectangles by splitting intersecting ones
+            # 1. Genera nuovi rettangoli massimali tagliando quelli che si sovrappongono
             new_free_rectangles = []
             for rect in free_rectangles:
                 if not rect.intersects(new_block):
                     new_free_rectangles.append(rect)
                 else:
-                    # Split into up to 4 new rectangles
                     if new_block.x > rect.x:
                         new_free_rectangles.append(Rect(rect.x, rect.y, new_block.x - rect.x, rect.d))
                     if new_block.x + new_block.w < rect.x + rect.w:
@@ -162,10 +167,10 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                     if new_block.y + new_block.d < rect.y + rect.d:
                         new_free_rectangles.append(Rect(rect.x, new_block.y + new_block.d, rect.w, rect.y + rect.d - (new_block.y + new_block.d)))
             
-            # 2. Remove degenerate rectangles
+            # 2. Rimuovi rettangoli degeneri (dimensione 0)
             new_free_rectangles = [r for r in new_free_rectangles if r.w > 0 and r.d > 0]
             
-            # 3. Remove rectangles fully contained within another
+            # 3. Rimuovi rettangoli completamente contenuti in altri (ottimizzazione memoria)
             final_free_rectangles = []
             for r1 in new_free_rectangles:
                 is_contained = False
@@ -178,7 +183,6 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                     
             free_rectangles = final_free_rectangles
 
-    # Dummy class mapping for specific API requirement
     class FSCompat:
         def __init__(self, w, d):
             self.w = w
@@ -275,7 +279,6 @@ else:
             qta_inseribile, msg = verifica_spazio(dati_mezzo_effettivo, st.session_state.carico, nuovo_oggetto_dict, quantita)
             
             if qta_inseribile > 0:
-                # RAGGRUPPAMENTO NELLA LISTA VISIVA (Evita doppioni in distinta)
                 trovato = False
                 for c in st.session_state.carico:
                     if (c['Nome'] == nuovo_oggetto_dict['Nome'] and 
@@ -303,14 +306,12 @@ else:
     with col_dx:
         st.subheader("3. Stato del Carico")
         
-        # Mostra i banner di log
         for tipo, msg in st.session_state.log_messaggi:
             if tipo == "success": st.success(msg)
             elif tipo == "warning": st.warning(msg)
             elif tipo == "error": st.error(msg)
-        st.session_state.log_messaggi = [] # Svuota log
+        st.session_state.log_messaggi = []
 
-        # Riesegue il calcolo per avere i dati aggiornati per la mappa
         _, blocchi_piazzati, spazi_liberi = simula_carico_completo(dati_mezzo_effettivo, st.session_state.carico)
         
         peso_attuale = sum(c['Peso'] * c['Quantità'] for c in st.session_state.carico)
@@ -320,7 +321,6 @@ else:
         perc_peso = int((peso_attuale / dati_mezzo_effettivo['Portata']) * 100) if dati_mezzo_effettivo['Portata'] else 0
         perc_spazio = int((area_occupata / area_totale) * 100) if area_totale else 0
         
-        # Calcolo geometrico reale degli EPAL residui basato sugli spazi liberi
         epal_residui = 0
         for space in spazi_liberi:
             epal_dritti = math.floor(space.w / 120) * math.floor(space.d / 80)
@@ -335,11 +335,9 @@ else:
         st.progress(min(perc_peso, 100), text="Grafico Peso")
         st.progress(min(perc_spazio, 100), text="Grafico Spazio")
         
-        # MAPPA 2D ORIZZONTALE CON PLOTLY
         st.write("**Mappa di Carico (Vista dall'Alto):**")
         fig = go.Figure()
         
-        # Disegna il pianale (X = Lunghezza, Y = Larghezza) - Scale 1:1 per non deformarlo
         fig.add_trace(go.Scatter(
             x=[0, dati_mezzo_effettivo['Lunghezza'], dati_mezzo_effettivo['Lunghezza'], 0, 0],
             y=[0, 0, dati_mezzo_effettivo['Larghezza'], dati_mezzo_effettivo['Larghezza'], 0],
@@ -353,7 +351,6 @@ else:
         
         colors = ['#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52']
         
-        # Disegna i blocchi della merce
         for i, b in enumerate(blocchi_piazzati):
             c = colors[i % len(colors)]
             
@@ -369,7 +366,6 @@ else:
                 hoverinfo="text"
             ))
             
-            # Testo grande al centro del blocco
             fig.add_trace(go.Scatter(
                 x=[b['x'] + b['l']/2],
                 y=[b['y'] + b['p']/2],
@@ -384,14 +380,13 @@ else:
             xaxis=dict(range=[-10, dati_mezzo_effettivo['Lunghezza']+10], showgrid=False, zeroline=False, visible=False),
             yaxis=dict(range=[-10, dati_mezzo_effettivo['Larghezza']+10], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
             margin=dict(l=0, r=0, t=10, b=0),
-            height=300, # Altezza compatta
+            height=300, 
             plot_bgcolor="white",
             showlegend=False
         )
         
         st.plotly_chart(fig, use_container_width=True)
 
-        # DISTINTA DI CARICO
         st.write("**Distinta di Carico:**")
         for i, c in enumerate(st.session_state.carico):
             col_txt, col_btn = st.columns([8, 1])
@@ -404,4 +399,3 @@ else:
             if st.button("🗑️ Svuota Camion", type="secondary"):
                 st.session_state.carico = []
                 st.rerun()
-
