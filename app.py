@@ -54,17 +54,21 @@ if 'carico' not in st.session_state:
     st.session_state.carico = []
 if 'log_messaggi' not in st.session_state:
     st.session_state.log_messaggi = []
-
-# --- MOTORE DI CALCOLO (BIN PACKING 2D + ALTEZZA) ---
-class FreeSpace:
+# --- MOTORE DI CALCOLO (Maximal Rectangles) ---
+class Rect:
     def __init__(self, x, y, w, d):
         self.x = x
         self.y = y
         self.w = w
         self.d = d
 
+    def intersects(self, other):
+        return not (self.x >= other.x + other.w or 
+                    self.x + self.w <= other.x or 
+                    self.y >= other.y + other.d or 
+                    self.y + self.d <= other.y)
+
 def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=0):
-    # 1. Raggruppa oggetti identici prima di creare le pile
     oggetti_raggruppati = {}
     
     def crea_chiave(d):
@@ -84,16 +88,13 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
         
     items = list(oggetti_raggruppati.values())
     
-    # Controllo Peso Totale
     peso_totale = sum(i['dati']['Peso'] * i['qta'] for i in items)
     if peso_totale > mezzo['Portata']: 
         return False, [], []
 
-    # 2. Algoritmo di piazzamento (Guillotine Split)
-    free_spaces = [FreeSpace(0, 0, mezzo['Lunghezza'], mezzo['Larghezza'])]
+    free_rectangles = [Rect(0, 0, mezzo['Lunghezza'], mezzo['Larghezza'])]
     placed_blocks = []
     
-    # Ordina gli oggetti da incastrare dal più ingombrante al più piccolo
     items.sort(key=lambda x: x['dati']['L'] * x['dati']['P'], reverse=True)
     
     for item in items:
@@ -101,66 +102,95 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
         dati = item['dati']
         
         while qta_rimasta > 0:
-            best_space_idx = -1
+            best_rect_idx = -1
             best_l, best_p = dati['L'], dati['P']
-            best_score = float('inf')
+            # Punteggio: (Coordinata Y, Coordinata X, Spazio sprecato). Priorità assoluta a Y e X.
+            best_score = (float('inf'), float('inf'), float('inf')) 
             
-            # LOGICA "BEST SHORT SIDE FIT" (Incastro misto intelligente)
-            for i, space in enumerate(free_spaces):
-                # 1. Prova orientamento Dritto
-                if space.w >= dati['L'] and space.d >= dati['P']:
-                    score_dritto = min(space.w - dati['L'], space.d - dati['P'])
+            for i, rect in enumerate(free_rectangles):
+                # Check orientamento dritto
+                if rect.w >= dati['L'] and rect.d >= dati['P']:
+                    leftover_w = rect.w - dati['L']
+                    leftover_d = rect.d - dati['P']
+                    score_dritto = (rect.y, rect.x, min(leftover_w, leftover_d))
+                    
                     if score_dritto < best_score:
                         best_score = score_dritto
-                        best_space_idx = i
+                        best_rect_idx = i
                         best_l, best_p = dati['L'], dati['P']
                         
-                # 2. Prova orientamento Ruotato
-                if dati.get('Ruotabile', True) and space.w >= dati['P'] and space.d >= dati['L']:
-                    score_ruotato = min(space.w - dati['P'], space.d - dati['L'])
-                    # A parità di scarto, preferisci la rotazione che allinea meglio i lati lunghi
-                    if score_ruotato < best_score or (score_ruotato == best_score and space.w - dati['P'] == 0):
+                # Check orientamento ruotato
+                if dati.get('Ruotabile', True) and rect.w >= dati['P'] and rect.d >= dati['L']:
+                    leftover_w = rect.w - dati['P']
+                    leftover_d = rect.d - dati['L']
+                    score_ruotato = (rect.y, rect.x, min(leftover_w, leftover_d))
+                    
+                    if score_ruotato < best_score:
                         best_score = score_ruotato
-                        best_space_idx = i
+                        best_rect_idx = i
                         best_l, best_p = dati['P'], dati['L']
                     
-            if best_space_idx == -1:
-                return False, [], [] # Spazio a terra finito
+            if best_rect_idx == -1:
+                return False, [], [] 
                 
-            space = free_spaces.pop(best_space_idx)
+            selected_rect = free_rectangles[best_rect_idx]
             
-            # Calcola quanti impilarne in questo specifico punto (Altezza)
             qta_impilabile = 1
             if dati.get('Sovrapponibile', False):
                 qta_impilabile = min(qta_rimasta, math.floor(mezzo['Altezza'] / dati['A']))
                 
             if qta_impilabile == 0: 
-                return False, [], [] # Non ci sta per l'altezza
+                return False, [], [] 
 
-            # Aggiungi blocco piazzato
+            new_block = Rect(selected_rect.x, selected_rect.y, best_l, best_p)
             placed_blocks.append({
                 'Nome': dati['Nome'],
-                'x': space.x, 'y': space.y, 'z': 0,
-                'l': best_l, 'p': best_p, 'a': dati['A'] * qta_impilabile,
+                'x': new_block.x, 'y': new_block.y, 'z': 0,
+                'l': new_block.w, 'p': new_block.d, 'a': dati['A'] * qta_impilabile,
                 'qta_stack': qta_impilabile
             })
             qta_rimasta -= qta_impilabile
             
-            # Taglio dello spazio residuo (Guillotine split adattivo per favorire corridoi)
-            w_rem = space.w - best_l
-            d_rem = space.d - best_p
+            # 1. Generate new maximal rectangles by splitting intersecting ones
+            new_free_rectangles = []
+            for rect in free_rectangles:
+                if not rect.intersects(new_block):
+                    new_free_rectangles.append(rect)
+                else:
+                    # Split into up to 4 new rectangles
+                    if new_block.x > rect.x:
+                        new_free_rectangles.append(Rect(rect.x, rect.y, new_block.x - rect.x, rect.d))
+                    if new_block.x + new_block.w < rect.x + rect.w:
+                        new_free_rectangles.append(Rect(new_block.x + new_block.w, rect.y, rect.x + rect.w - (new_block.x + new_block.w), rect.d))
+                    if new_block.y > rect.y:
+                        new_free_rectangles.append(Rect(rect.x, rect.y, rect.w, new_block.y - rect.y))
+                    if new_block.y + new_block.d < rect.y + rect.d:
+                        new_free_rectangles.append(Rect(rect.x, new_block.y + new_block.d, rect.w, rect.y + rect.d - (new_block.y + new_block.d)))
             
-            if w_rem > d_rem:
-                if w_rem > 0: free_spaces.append(FreeSpace(space.x + best_l, space.y, w_rem, space.d))
-                if d_rem > 0: free_spaces.append(FreeSpace(space.x, space.y + best_p, best_l, d_rem))
-            else:
-                if w_rem > 0: free_spaces.append(FreeSpace(space.x + best_l, space.y, w_rem, best_p))
-                if d_rem > 0: free_spaces.append(FreeSpace(space.x, space.y + best_p, space.w, d_rem))
-                
-            # Riordina spazi liberi: prima dal fondo (x), poi dal basso (y)
-            free_spaces.sort(key=lambda s: (s.x, s.y))
+            # 2. Remove degenerate rectangles
+            new_free_rectangles = [r for r in new_free_rectangles if r.w > 0 and r.d > 0]
             
-    return True, placed_blocks, free_spaces
+            # 3. Remove rectangles fully contained within another
+            final_free_rectangles = []
+            for r1 in new_free_rectangles:
+                is_contained = False
+                for r2 in new_free_rectangles:
+                    if r1 != r2 and r1.x >= r2.x and r1.y >= r2.y and r1.x + r1.w <= r2.x + r2.w and r1.y + r1.d <= r2.y + r2.d:
+                        is_contained = True
+                        break
+                if not is_contained:
+                    final_free_rectangles.append(r1)
+                    
+            free_rectangles = final_free_rectangles
+
+    # Dummy class mapping for specific API requirement
+    class FSCompat:
+        def __init__(self, w, d):
+            self.w = w
+            self.d = d
+            
+    spazi_compatibili = [FSCompat(r.w, r.d) for r in free_rectangles]
+    return True, placed_blocks, spazi_compatibili
 
 def verifica_spazio(mezzo, carico_attuale, nuovo_oggetto, qta_richiesta):
     # Logica di Saturazione progressiva: provo a metterli tutti, sennò scalo
