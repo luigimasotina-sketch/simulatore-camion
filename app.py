@@ -31,9 +31,23 @@ if 'mezzi' not in st.session_state:
 
 if 'oggetti' not in st.session_state:
     st.session_state.oggetti = pd.DataFrame([
-        {"Nome": "Pallet EPAL Standard", "L": 120, "P": 80, "A": 15, "Peso": 25, "Sovrapponibile": True, "Ruotabile": True},
-        {"Nome": "Macchinario Standard A", "L": 120, "P": 80, "A": 150, "Peso": 300, "Sovrapponibile": False, "Ruotabile": False},
-        {"Nome": "Cassa Ricambi Piccola", "L": 80, "P": 60, "A": 60, "Peso": 50, "Sovrapponibile": True, "Ruotabile": True}
+        {"Nome": "Gabbia", "L": 120, "P": 100, "A": 110, "Peso": 150, "Sovrapponibile": True, "Ruotabile": True},
+        {"Nome": "Pallet EPAL Standard", "L": 120, "P": 80, "A": 30, "Peso": 25, "Sovrapponibile": True, "Ruotabile": True},
+        {"Nome": "KM 120 Pallet", "L": 219, "P": 138, "A": 170, "Peso": 880, "Sovrapponibile": False, "Ruotabile": True},
+        {"Nome": "KM 120 a vista", "L": 219, "P": 138, "A": 170, "Peso": 880, "Sovrapponibile": False, "Ruotabile": False},
+        {"Nome": "KM 105 Pallet", "L": 203, "P": 117, "A": 156, "Peso": 560, "Sovrapponibile": False, "Ruotabile": True},
+        {"Nome": "KM 105 a vista", "L": 203, "P": 117, "A": 156, "Peso": 560, "Sovrapponibile": False, "Ruotabile": False},
+        {"Nome": "KM 130 Pallet", "L": 218, "P": 150, "A": 170, "Peso": 955, "Sovrapponibile": False, "Ruotabile": True},
+        {"Nome": "KM 130 a vista", "L": 218, "P": 150, "A": 170, "Peso": 955, "Sovrapponibile": False, "Ruotabile": False},
+        {"Nome": "KM 150 Pallet", "L": 254, "P": 172, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": True},
+        {"Nome": "KM 150 a vista", "L": 254, "P": 172, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": False},
+        {"Nome": "KM 170 Pallet", "L": 265, "P": 193, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": True},
+        {"Nome": "KM 170 a vista", "L": 265, "P": 193, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": False},
+        {"Nome": "B300 Pallet", "L": 249, "P": 157, "A": 186, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
+        {"Nome": "B300 a vista", "L": 249, "P": 157, "A": 186, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": False},
+        {"Nome": "B260", "L": 234, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
+        {"Nome": "B260 COMBO", "L": 325, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
+        
     ])
 
 if 'carico' not in st.session_state:
@@ -89,19 +103,26 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
         while qta_rimasta > 0:
             best_space_idx = -1
             best_l, best_p = dati['L'], dati['P']
+            best_score = float('inf')
             
-            # Cerca il primo spazio utile
+            # LOGICA "BEST SHORT SIDE FIT" (Incastro misto intelligente)
             for i, space in enumerate(free_spaces):
-                # Proviamo orientamento normale
+                # 1. Prova orientamento Dritto
                 if space.w >= dati['L'] and space.d >= dati['P']:
-                    best_space_idx = i
-                    best_l, best_p = dati['L'], dati['P']
-                    break
-                # Proviamo ruotato
-                elif dati.get('Ruotabile', True) and space.w >= dati['P'] and space.d >= dati['L']:
-                    best_space_idx = i
-                    best_l, best_p = dati['P'], dati['L']
-                    break
+                    score_dritto = min(space.w - dati['L'], space.d - dati['P'])
+                    if score_dritto < best_score:
+                        best_score = score_dritto
+                        best_space_idx = i
+                        best_l, best_p = dati['L'], dati['P']
+                        
+                # 2. Prova orientamento Ruotato
+                if dati.get('Ruotabile', True) and space.w >= dati['P'] and space.d >= dati['L']:
+                    score_ruotato = min(space.w - dati['P'], space.d - dati['L'])
+                    # A parità di scarto, preferisci la rotazione che allinea meglio i lati lunghi
+                    if score_ruotato < best_score or (score_ruotato == best_score and space.w - dati['P'] == 0):
+                        best_score = score_ruotato
+                        best_space_idx = i
+                        best_l, best_p = dati['P'], dati['L']
                     
             if best_space_idx == -1:
                 return False, [], [] # Spazio a terra finito
@@ -125,16 +146,18 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
             })
             qta_rimasta -= qta_impilabile
             
-            # Taglio dello spazio residuo (Guillotine split sull'asse più lungo)
+            # Taglio dello spazio residuo (Guillotine split adattivo per favorire corridoi)
             w_rem = space.w - best_l
             d_rem = space.d - best_p
             
-            if w_rem > 0:
-                free_spaces.append(FreeSpace(space.x + best_l, space.y, w_rem, best_p))
-            if d_rem > 0:
-                free_spaces.append(FreeSpace(space.x, space.y + best_p, space.w, d_rem))
+            if w_rem > d_rem:
+                if w_rem > 0: free_spaces.append(FreeSpace(space.x + best_l, space.y, w_rem, space.d))
+                if d_rem > 0: free_spaces.append(FreeSpace(space.x, space.y + best_p, best_l, d_rem))
+            else:
+                if w_rem > 0: free_spaces.append(FreeSpace(space.x + best_l, space.y, w_rem, best_p))
+                if d_rem > 0: free_spaces.append(FreeSpace(space.x, space.y + best_p, space.w, d_rem))
                 
-            # Riordina spazi liberi: si riempie dal fondo del camion (X minore)
+            # Riordina spazi liberi: prima dal fondo (x), poi dal basso (y)
             free_spaces.sort(key=lambda s: (s.x, s.y))
             
     return True, placed_blocks, free_spaces
