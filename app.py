@@ -23,7 +23,7 @@ if 'mezzi' not in st.session_state:
         {"Nome": "Bilico 13.6m", "Lunghezza": 1360, "Larghezza": 240, "Altezza": 270, "Portata": 24000},
         {"Nome": "Motrice 9 mt", "Lunghezza": 960, "Larghezza": 240, "Altezza": 260, "Portata": 15000},
         {"Nome": "Motrice 7 mt", "Lunghezza": 750, "Larghezza": 240, "Altezza": 255, "Portata": 9000},
-        {"Nome": "Daily", "Lunghezza": 445, "Larghezza": 210, "Altezza": 230, "Portata": 24000},
+        {"Nome": "Daily", "Lunghezza": 445, "Larghezza": 210, "Altezza": 230, "Portata": 1000},
         {"Nome": "Container 20 piedi", "Lunghezza": 590, "Larghezza": 235, "Altezza": 239, "Portata": 9000},
         {"Nome": "Container 40 piedi", "Lunghezza": 1203, "Larghezza": 235, "Altezza": 239, "Portata": 24000},
         {"Nome": "Container 40 piedi HC", "Lunghezza": 1203, "Larghezza": 235, "Altezza": 269, "Portata": 24000}
