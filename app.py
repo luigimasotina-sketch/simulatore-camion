@@ -3,10 +3,9 @@ import pandas as pd
 import plotly.graph_objects as go
 import math
 
-# --- STREAMLIT CONFIG ---
 st.set_page_config(page_title="Simulatore di Carico Aziendale", layout="wide")
 
-# --- CSS STYLING ---
+# Ingrandiamo i menu a tendina e compattiamo la vista
 st.markdown("""
 <style>
     .stSelectbox label { font-size: 1.2rem; font-weight: bold; }
@@ -16,8 +15,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# --- INIZIALIZZAZIONE DATI (ANAGRAFICHE DI BASE) ---
-# Ripristino di log_messaggi per evitare il crash
+# Inizializzazione della variabile dei log per evitare l'errore al riavvio
 if 'log_messaggi' not in st.session_state:
     st.session_state.log_messaggi = []
 
@@ -50,13 +48,24 @@ if 'oggetti' not in st.session_state:
         {"Nome": "B300 a vista", "L": 249, "P": 157, "A": 186, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": False},
         {"Nome": "B260", "L": 234, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
         {"Nome": "B260 COMBO", "L": 325, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
-        {"Nome": "Pallet Custom", "L": 120, "P": 80, "A": 100, "Peso": 50, "Sovrapponibile": False, "Ruotabile": True}
     ])
 
 if 'carico' not in st.session_state:
     st.session_state.carico = []
 
-# --- NUOVO MOTORE DI CALCOLO (Shelf Algorithm - Approccio Logistico) ---
+class Rect:
+    def __init__(self, x, y, w, d):
+        self.x = x
+        self.y = y
+        self.w = w
+        self.d = d
+
+    def intersects(self, other):
+        return not (self.x >= other.x + other.w or 
+                    self.x + self.w <= other.x or 
+                    self.y >= other.y + other.d or 
+                    self.y + self.d <= other.y)
+
 def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=0):
     oggetti_raggruppati = {}
     
@@ -76,109 +85,136 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
         oggetti_raggruppati[k]['qta'] += qta_nuovo
         
     items = list(oggetti_raggruppati.values())
-    
     peso_totale = sum(i['dati']['Peso'] * i['qta'] for i in items)
     if peso_totale > mezzo['Portata']: 
         return False, [], []
 
-    placed_blocks = []
-    
-    # Ordinamento: Prima i più ingombranti (area maggiore)
-    items.sort(key=lambda x: max(x['dati']['L'], x['dati']['P']) * min(x['dati']['L'], x['dati']['P']), reverse=True)
+    items.sort(key=lambda x: x['dati']['L'] * x['dati']['P'], reverse=True)
 
-    current_x = 0  # Profondità (Lunghezza camion)
-    current_y = 0  # Larghezza (Lato portelloni)
-    shelf_depth = 0 # Profondità della riga corrente
-    
-    for item in items:
-        qta_rimasta = item['qta']
-        dati = item['dati']
+    def simula_pass(items_da_caricare, preferisci_ruotato):
+        free_rectangles = [Rect(0, 0, mezzo['Lunghezza'], mezzo['Larghezza'])]
+        placed_blocks = []
+        qta_totale_inserita = 0
+        max_x = 0
         
-        while qta_rimasta > 0:
-            # Calcolo impilabilità
-            qta_impilabile = 1
-            if dati.get('Sovrapponibile', False):
-                qta_impilabile = min(qta_rimasta, math.floor(mezzo['Altezza'] / dati['A']))
-            if qta_impilabile == 0: return False, [], []
+        items_copia = [{'dati': i['dati'], 'qta': i['qta']} for i in items_da_caricare]
+        
+        for item in items_copia:
+            qta_rimasta = item['qta']
+            dati = item['dati']
             
-            # Scelta Rotazione (Logica: Mettili nel modo che ne fa stare di più in una riga orizzontale)
-            l, p = dati['L'], dati['P']
-            ruotabile = dati.get('Ruotabile', True)
-            
-            best_l, best_p = l, p
-            
-            if ruotabile:
-                # Caso Bilico: Se girarlo (lato corto sulla Y) mi permette di chiudere la riga (es. 240cm -> 80+80+80), preferiscilo.
-                spazio_rimanente_largo = mezzo['Larghezza'] - current_y
+            while qta_rimasta > 0:
+                best_rect_idx = -1
+                best_l, best_p = dati['L'], dati['P']
                 
-                # Se entra girato ma non dritto
-                if p <= spazio_rimanente_largo and l > spazio_rimanente_largo:
-                    best_l, best_p = p, l
-                # Se entrano entrambi, scegli quello che lascia il "resto" minore, massimizzando l'incastro
-                elif l <= spazio_rimanente_largo and p <= spazio_rimanente_largo:
-                    # Incastro "umano": se è un EPAL (120x80) su un 240, metterne 3 (da 80) è meglio di 2 (da 120)
-                    resto_dritto = spazio_rimanente_largo % l
-                    resto_girato = spazio_rimanente_largo % p
+                # Punteggio "Bottom-Left" puro: 
+                # Coordinata X prioritaria (spinge verso la testata del camion), 
+                # Coordinata Y secondaria (allinea i pallet creando colonne).
+                best_score = (float('inf'), float('inf'), float('inf')) 
+                
+                for i, rect in enumerate(free_rectangles):
+                    # Check dritto
+                    if rect.w >= dati['L'] and rect.d >= dati['P']:
+                        penalita = 1 if preferisci_ruotato else 0
+                        score_dritto = (rect.x, rect.y, penalita)
+                        if score_dritto < best_score:
+                            best_score = score_dritto
+                            best_rect_idx = i
+                            best_l, best_p = dati['L'], dati['P']
+                            
+                    # Check ruotato
+                    if dati.get('Ruotabile', True) and rect.w >= dati['P'] and rect.d >= dati['L']:
+                        penalita = 0 if preferisci_ruotato else 1
+                        score_ruotato = (rect.x, rect.y, penalita)
+                        if score_ruotato < best_score:
+                            best_score = score_ruotato
+                            best_rect_idx = i
+                            best_l, best_p = dati['P'], dati['L']
+                
+                if best_rect_idx == -1:
+                    break # Nessuno spazio residuo trovato
                     
-                    if resto_girato < resto_dritto:
-                         best_l, best_p = p, l
-                    elif resto_girato == resto_dritto:
-                        # Tie-breaker: se il resto è uguale, metti il lato corto lungo la X (profondità) per risparmiare metri lineari
-                        if p < l:
-                            best_l, best_p = p, l
-                else:
-                    pass # Non entra in nessun modo nella riga corrente, gestito sotto
-
-            # Controllo: Se non entra in questa riga, vado a capo
-            if current_y + best_p > mezzo['Larghezza']:
-                current_x += shelf_depth
-                current_y = 0
-                shelf_depth = 0
+                selected_rect = free_rectangles[best_rect_idx]
                 
-                # Ricalcola la rotazione migliore per l'inizio della nuova riga
-                best_l, best_p = l, p
-                if ruotabile:
-                    resto_dritto = mezzo['Larghezza'] % l
-                    resto_girato = mezzo['Larghezza'] % p
-                    if resto_girato < resto_dritto or (resto_girato == resto_dritto and p < l):
-                        best_l, best_p = p, l
+                qta_impilabile = 1
+                if dati.get('Sovrapponibile', False):
+                    qta_impilabile = min(qta_rimasta, math.floor(mezzo['Altezza'] / dati['A']))
+                    
+                if qta_impilabile == 0: 
+                    break 
 
-            # Controllo Finale: Sbatto contro le porte posteriori?
-            if current_x + best_l > mezzo['Lunghezza']:
-                # Ultima speranza: Proviamo l'altra rotazione per vedere se salva il carico all'ultimo millimetro
-                if ruotabile:
-                    alt_l, alt_p = (p, l) if (best_l, best_p) == (l, p) else (l, p)
-                    if current_x + alt_l <= mezzo['Lunghezza'] and current_y + alt_p <= mezzo['Larghezza']:
-                         best_l, best_p = alt_l, alt_p
+                new_block = Rect(selected_rect.x, selected_rect.y, best_l, best_p)
+                placed_blocks.append({
+                    'Nome': dati['Nome'],
+                    'x': new_block.x, 'y': new_block.y, 'z': 0,
+                    'l': new_block.w, 'p': new_block.d, 'a': dati['A'] * qta_impilabile,
+                    'qta_stack': qta_impilabile
+                })
+                
+                qta_rimasta -= qta_impilabile
+                qta_totale_inserita += qta_impilabile
+                if new_block.x + new_block.w > max_x:
+                    max_x = new_block.x + new_block.w
+                
+                # Taglio degli spazi (Maximal Rectangles)
+                new_free_rectangles = []
+                for rect in free_rectangles:
+                    if not rect.intersects(new_block):
+                        new_free_rectangles.append(rect)
                     else:
-                        return False, [], [] # Definitivamente pieno
-                else:
-                    return False, [], []
+                        if new_block.x > rect.x:
+                            new_free_rectangles.append(Rect(rect.x, rect.y, new_block.x - rect.x, rect.d))
+                        if new_block.x + new_block.w < rect.x + rect.w:
+                            new_free_rectangles.append(Rect(new_block.x + new_block.w, rect.y, rect.x + rect.w - (new_block.x + new_block.w), rect.d))
+                        if new_block.y > rect.y:
+                            new_free_rectangles.append(Rect(rect.x, rect.y, rect.w, new_block.y - rect.y))
+                        if new_block.y + new_block.d < rect.y + rect.d:
+                            new_free_rectangles.append(Rect(rect.x, new_block.y + new_block.d, rect.w, rect.y + rect.d - (new_block.y + new_block.d)))
+                
+                new_free_rectangles = [r for r in new_free_rectangles if r.w > 0 and r.d > 0]
+                final_free_rectangles = []
+                for r1 in new_free_rectangles:
+                    is_contained = False
+                    for r2 in new_free_rectangles:
+                        if r1 != r2 and r1.x >= r2.x and r1.y >= r2.y and r1.x + r1.w <= r2.x + r2.w and r1.y + r1.d <= r2.y + r2.d:
+                            is_contained = True
+                            break
+                    if not is_contained:
+                        final_free_rectangles.append(r1)
+                        
+                free_rectangles = final_free_rectangles
 
-            # Piazza il blocco
-            placed_blocks.append({
-                'Nome': dati['Nome'],
-                'x': current_x, 'y': current_y, 'z': 0,
-                'l': best_l, 'p': best_p, 'a': dati['A'] * qta_impilabile,
-                'qta_stack': qta_impilabile
-            })
+        return qta_totale_inserita, max_x, placed_blocks, free_rectangles
+
+    # Eseguiamo due simulazioni: una che preferisce i pallet dritti, una i ruotati
+    qta1, mx1, blocks1, free1 = simula_pass(items, preferisci_ruotato=False)
+    qta2, mx2, blocks2, free2 = simula_pass(items, preferisci_ruotato=True) 
+
+    qta_richiesta_totale = sum(i['qta'] for i in items)
+    ok1 = (qta1 == qta_richiesta_totale)
+    ok2 = (qta2 == qta_richiesta_totale)
+    
+    # Sceglie il risultato che carica di più. A parità di carico, sceglie quello che occupa meno lunghezza
+    if qta1 > qta2:
+        best_pass = 1
+    elif qta2 > qta1:
+        best_pass = 2
+    else:
+        if mx1 <= mx2:
+            best_pass = 1
+        else:
+            best_pass = 2
             
-            # Aggiorna i cursori
-            current_y += best_p
-            shelf_depth = max(shelf_depth, best_l)
-            qta_rimasta -= qta_impilabile
-
-    # Dummy class mapping per retrocompatibilità (non più usata per calcolo epal ma richiesta dall'interfaccia)
     class FSCompat:
         def __init__(self, w, d):
-            self.w = w
-            self.d = d
-            
-    # Calcolo molto approssimativo dello spazio finale rimasto
-    spazio_rimanente_x = mezzo['Lunghezza'] - (current_x + shelf_depth)
-    spazi_compatibili = [FSCompat(spazio_rimanente_x, mezzo['Larghezza'])]
-    
-    return True, placed_blocks, spazi_compatibili
+            self.w, self.d = w, d
+
+    if best_pass == 1:
+        spazi = [FSCompat(r.w, r.d) for r in free1]
+        return ok1, blocks1, spazi
+    else:
+        spazi = [FSCompat(r.w, r.d) for r in free2]
+        return ok2, blocks2, spazi
 
 def verifica_spazio(mezzo, carico_attuale, nuovo_oggetto, qta_richiesta):
     for q in range(qta_richiesta, 0, -1):
@@ -190,13 +226,12 @@ def verifica_spazio(mezzo, carico_attuale, nuovo_oggetto, qta_richiesta):
                 return q, f"Spazio o portata in esaurimento: caricati solo {q} pezzi su {qta_richiesta}."
     return 0, "Spazio o portata insufficiente per aggiungere anche un solo pezzo."
 
-# --- SIDEBAR NAVIGAZIONE ---
 st.sidebar.title("🚛 Navigazione")
 pagina = st.sidebar.radio("Scegli la pagina:", ["Simulatore di Carico", "Gestione Anagrafiche"])
 
 if pagina == "Gestione Anagrafiche":
     st.title("⚙️ Gestione Anagrafiche")
-    st.markdown("Modifica le tabelle qui sotto per aggiungere, modificare o eliminare (seleziona la riga e premi **Canc** sulla tastiera). Le modifiche vengono usate istantaneamente nel simulatore.")
+    st.markdown("Modifica le tabelle qui sotto. Le modifiche vengono usate istantaneamente nel simulatore.")
     
     st.subheader("Anagrafica Mezzi")
     st.session_state.mezzi = st.data_editor(st.session_state.mezzi, num_rows="dynamic", use_container_width=True)
@@ -205,10 +240,8 @@ if pagina == "Gestione Anagrafiche":
     st.session_state.oggetti = st.data_editor(st.session_state.oggetti, num_rows="dynamic", use_container_width=True)
 
 else:
-    # --- PAGINA PRINCIPALE (SIMULATORE) ---
     st.title("🚛 Simulatore di Carico Aziendale")
 
-    # --- AREA A: SELEZIONE MEZZO ---
     nomi_mezzi = st.session_state.mezzi["Nome"].tolist()
     mezzo_selezionato = st.selectbox("1. Seleziona il Mezzo", nomi_mezzi, label_visibility="collapsed")
     dati_mezzo = st.session_state.mezzi[st.session_state.mezzi["Nome"] == mezzo_selezionato].iloc[0].to_dict()
@@ -222,18 +255,15 @@ else:
     col_m2.metric("Larghezza (P)", f"{dati_mezzo_effettivo['Larghezza']} cm")
     col_m3.metric("Altezza Utile", f"{dati_mezzo_effettivo['Altezza']} cm", f"(-15cm margine)", delta_color="off")
     col_m4.metric("Portata Max", f"{dati_mezzo_effettivo['Portata']} kg")
-    
     st.divider()
 
     col_sx, col_dx = st.columns([1, 2], gap="large")
 
-    # --- AREA B: INSERIMENTO MERCE ---
     with col_sx:
         st.subheader("2. Aggiungi Merce")
         
         lista_oggetti = st.session_state.oggetti.to_dict('records')
         opzioni_menu = ["Oggetto non in anagrafica"] + [f"{o['Nome']} ({o['L']}x{o['P']}x{o['A']}cm | {o['Peso']}kg)" for o in lista_oggetti]
-        
         scelta_oggetto = st.selectbox("Seleziona Oggetto:", opzioni_menu)
         
         if scelta_oggetto == "Oggetto non in anagrafica":
@@ -262,7 +292,6 @@ else:
         
         if st.button("➕ Aggiungi al Carico", type="primary", use_container_width=True):
             nuovo_oggetto_dict = {"Nome": nome_da_aggiungere, "L": L, "P": P, "A": A, "Peso": Peso, "Sovrapponibile": sovr, "Ruotabile": ruot}
-            
             qta_inseribile, msg = verifica_spazio(dati_mezzo_effettivo, st.session_state.carico, nuovo_oggetto_dict, quantita)
             
             if qta_inseribile > 0:
@@ -286,13 +315,10 @@ else:
                     st.session_state.log_messaggi = [("warning", msg)]
             else:
                 st.session_state.log_messaggi = [("error", msg)]
-                
             st.rerun()
 
-    # --- AREA C: STATO DEL CARICO E MAPPA ---
     with col_dx:
         st.subheader("3. Stato del Carico")
-        
         for tipo, msg in st.session_state.log_messaggi:
             if tipo == "success": st.success(msg)
             elif tipo == "warning": st.warning(msg)
@@ -317,7 +343,7 @@ else:
         c1, c2, c3 = st.columns(3)
         c1.metric("Saturazione Peso", f"{perc_peso}%", f"{dati_mezzo_effettivo['Portata'] - peso_attuale} kg liberi", delta_color="normal")
         c2.metric("Saturazione Pianale", f"{perc_spazio}%", f"{(area_totale - area_occupata):.1f} m² liberi", delta_color="normal")
-        c3.metric("Spazi EPAL Certi (Stima)", f"{epal_residui} plt")
+        c3.metric("Spazi EPAL Certi", f"{epal_residui} plt")
         
         st.progress(min(perc_peso, 100), text="Grafico Peso")
         st.progress(min(perc_spazio, 100), text="Grafico Spazio")
@@ -328,48 +354,32 @@ else:
         fig.add_trace(go.Scatter(
             x=[0, dati_mezzo_effettivo['Lunghezza'], dati_mezzo_effettivo['Lunghezza'], 0, 0],
             y=[0, 0, dati_mezzo_effettivo['Larghezza'], dati_mezzo_effettivo['Larghezza'], 0],
-            fill="toself",
-            fillcolor="lightgray",
-            line=dict(color="black", width=2),
-            mode="lines",
-            name="Pianale",
-            hoverinfo="skip"
+            fill="toself", fillcolor="lightgray", line=dict(color="black", width=2),
+            mode="lines", name="Pianale", hoverinfo="skip"
         ))
         
         colors = ['#EF553B', '#00CC96', '#AB63FA', '#FFA15A', '#19D3F3', '#FF6692', '#B6E880', '#FF97FF', '#FECB52']
         
         for i, b in enumerate(blocchi_piazzati):
             c = colors[i % len(colors)]
-            
             fig.add_trace(go.Scatter(
                 x=[b['x'], b['x']+b['l'], b['x']+b['l'], b['x'], b['x']],
                 y=[b['y'], b['y'], b['y']+b['p'], b['y']+b['p'], b['y']],
-                fill="toself",
-                fillcolor=c,
-                line=dict(color="black", width=1),
-                mode="lines",
-                name=f"{b['Nome']} (x{b['qta_stack']})",
-                text=f"<b>{b['Nome']}</b><br>x{b['qta_stack']}",
-                hoverinfo="text"
+                fill="toself", fillcolor=c, line=dict(color="black", width=1),
+                mode="lines", name=f"{b['Nome']} (x{b['qta_stack']})",
+                text=f"<b>{b['Nome']}</b><br>x{b['qta_stack']}", hoverinfo="text"
             ))
             
             fig.add_trace(go.Scatter(
-                x=[b['x'] + b['l']/2],
-                y=[b['y'] + b['p']/2],
-                mode="text",
-                text=[f"<b>{b['qta_stack']}x</b><br>{b['Nome'][:10]}"],
-                textfont=dict(size=14, color="white"),
-                hoverinfo="skip",
-                showlegend=False
+                x=[b['x'] + b['l']/2], y=[b['y'] + b['p']/2],
+                mode="text", text=[f"<b>{b['qta_stack']}x</b><br>{b['Nome'][:10]}"],
+                textfont=dict(size=14, color="white"), hoverinfo="skip", showlegend=False
             ))
             
         fig.update_layout(
             xaxis=dict(range=[-10, dati_mezzo_effettivo['Lunghezza']+10], showgrid=False, zeroline=False, visible=False),
             yaxis=dict(range=[-10, dati_mezzo_effettivo['Larghezza']+10], showgrid=False, zeroline=False, visible=False, scaleanchor="x", scaleratio=1),
-            margin=dict(l=0, r=0, t=10, b=0),
-            height=300, 
-            plot_bgcolor="white",
-            showlegend=False
+            margin=dict(l=0, r=0, t=10, b=0), height=300, plot_bgcolor="white", showlegend=False
         )
         
         st.plotly_chart(fig, use_container_width=True)
