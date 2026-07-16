@@ -104,17 +104,15 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 best_rect_idx = -1
                 best_l, best_p = dati['L'], dati['P']
                 
-                # La logica Pura Bottom-Left:
-                # Il punteggio è (X, Y). Vince chi sta più in basso a sinistra.
-                # Se due orientamenti entrano nello STESSO esatto punto (es. 0,0),
-                # la 'penalita' decide quale dei due preferire per questo Pass.
+                # Nuova logica: "Distanza dall'origine" (x + y). 
+                # Evita di creare sbalzi e costringe a formare blocchi compatti.
                 best_score = (float('inf'), float('inf'), float('inf')) 
                 
                 for i, rect in enumerate(free_rectangles):
                     # Check dritto
                     if rect.w >= dati['L'] and rect.d >= dati['P']:
                         penalita = 1 if preferisci_ruotato else 0
-                        score_dritto = (rect.x, rect.y, penalita)
+                        score_dritto = (rect.x + rect.y, rect.x, penalita)
                         if score_dritto < best_score:
                             best_score = score_dritto
                             best_rect_idx = i
@@ -123,7 +121,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                     # Check ruotato
                     if dati.get('Ruotabile', True) and rect.w >= dati['P'] and rect.d >= dati['L']:
                         penalita = 0 if preferisci_ruotato else 1
-                        score_ruotato = (rect.x, rect.y, penalita)
+                        score_ruotato = (rect.x + rect.y, rect.x, penalita)
                         if score_ruotato < best_score:
                             best_score = score_ruotato
                             best_rect_idx = i
@@ -331,7 +329,7 @@ else:
             gl = int(l_camion // 10)
             gw = int(p_camion // 10)
             
-            def simula_griglia(ruota_prima):
+            def conta_epal(dim_x, dim_y):
                 grid = [[0 for _ in range(gw)] for _ in range(gl)]
                 # 1. Disegna i blocchi attuali sulla griglia
                 for b in blocchi:
@@ -342,32 +340,26 @@ else:
                             grid[i][j] = 1
                 
                 count = 0
-                # Definisci le priorità (dritto o ruotato)
-                shapes = [(8, 12), (12, 8)] if ruota_prima else [(12, 8), (8, 12)]
-                
-                # 2. Cerca spazi per EPAL
-                for dim_x, dim_y in shapes:
-                    for i in range(gl - dim_x + 1):
-                        for j in range(gw - dim_y + 1):
-                            # Controlla se l'area è libera
-                            is_empty = True
+                # 2. Cerca spazi per EPAL mantenendo un orientamento puro (molto più realistico)
+                for i in range(gl - dim_x + 1):
+                    for j in range(gw - dim_y + 1):
+                        is_empty = True
+                        for dx in range(dim_x):
+                            for dy in range(dim_y):
+                                if grid[i+dx][j+dy] == 1:
+                                    is_empty = False
+                                    break
+                            if not is_empty: break
+                        
+                        if is_empty:
+                            count += 1
                             for dx in range(dim_x):
                                 for dy in range(dim_y):
-                                    if grid[i+dx][j+dy] == 1:
-                                        is_empty = False
-                                        break
-                                if not is_empty: break
-                            
-                            # Se libera, "piazza" l'EPAL virtuale
-                            if is_empty:
-                                count += 1
-                                for dx in range(dim_x):
-                                    for dy in range(dim_y):
-                                        grid[i+dx][j+dy] = 1
+                                    grid[i+dx][j+dy] = 1
                 return count
 
-            # Testa sia la disposizione dritta che ruotata e prende la migliore
-            return max(simula_griglia(False), simula_griglia(True))
+            # Testa le due disposizioni pure (non mischiate a casaccio) e prende la migliore
+            return max(conta_epal(12, 8), conta_epal(8, 12))
             
         epal_residui = calcola_epal_certi(dati_mezzo_effettivo['Lunghezza'], dati_mezzo_effettivo['Larghezza'], blocchi_piazzati)
         # ----------------------------------------------------------------------------------
