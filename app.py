@@ -103,16 +103,14 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
             while qta_rimasta > 0:
                 best_rect_idx = -1
                 best_l, best_p = dati['L'], dati['P']
-                
-                # Nuova logica: "Distanza dall'origine" (x + y). 
-                # Evita di creare sbalzi e costringe a formare blocchi compatti.
                 best_score = (float('inf'), float('inf'), float('inf')) 
                 
                 for i, rect in enumerate(free_rectangles):
                     # Check dritto
                     if rect.w >= dati['L'] and rect.d >= dati['P']:
                         penalita = 1 if preferisci_ruotato else 0
-                        score_dritto = (rect.x + rect.y, rect.x, penalita)
+                        # Ricerca posizionamento più in basso e a sinistra possibile
+                        score_dritto = (rect.x, rect.y, penalita)
                         if score_dritto < best_score:
                             best_score = score_dritto
                             best_rect_idx = i
@@ -121,14 +119,15 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                     # Check ruotato
                     if dati.get('Ruotabile', True) and rect.w >= dati['P'] and rect.d >= dati['L']:
                         penalita = 0 if preferisci_ruotato else 1
-                        score_ruotato = (rect.x + rect.y, rect.x, penalita)
+                        # Ricerca posizionamento più in basso e a sinistra possibile
+                        score_ruotato = (rect.x, rect.y, penalita)
                         if score_ruotato < best_score:
                             best_score = score_ruotato
                             best_rect_idx = i
                             best_l, best_p = dati['P'], dati['L']
                 
                 if best_rect_idx == -1:
-                    break # Spazio finito per questo oggetto
+                    break 
                     
                 selected_rect = free_rectangles[best_rect_idx]
                 
@@ -178,22 +177,29 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                         
                 free_rectangles = final_free_rectangles
 
-        return qta_totale_inserita, placed_blocks, free_rectangles
+        # MODIFICA CHIAVE: Calcola l'ingombro massimo sul pianale (Lunghezza occupata)
+        max_x = max([b['x'] + b['l'] for b in placed_blocks], default=0)
+        return qta_totale_inserita, placed_blocks, free_rectangles, max_x
 
-    # Simuliamo forzando l'ordine standard (Dritto) - Ideale per Bilico 33 plt
-    qta1, blocks1, free1 = simula_pass(items, preferisci_ruotato=False)
-    # Simuliamo forzando l'ordine ruotato - Ideale per Incastri Daily
-    qta2, blocks2, free2 = simula_pass(items, preferisci_ruotato=True) 
+    # Simuliamo le due strategie
+    qta1, blocks1, free1, max_x1 = simula_pass(items, preferisci_ruotato=False)
+    qta2, blocks2, free2, max_x2 = simula_pass(items, preferisci_ruotato=True) 
 
     qta_richiesta_totale = sum(i['qta'] for i in items)
     ok1 = (qta1 == qta_richiesta_totale)
     ok2 = (qta2 == qta_richiesta_totale)
     
-    # Sceglie la strategia che ha caricato più pezzi. A parità, vince la 1 (Standard/Dritto).
+    # NUOVA LOGICA: Se le quantità caricate sono uguali, vince la strategia più compatta (max_x minore)
     if qta2 > qta1:
         best_pass = 2
-    else:
+    elif qta1 > qta2:
         best_pass = 1
+    else:
+        # Pareggio di pezzi: chi occupa meno profondità del camion?
+        if max_x2 < max_x1:
+            best_pass = 2
+        else:
+            best_pass = 1
             
     class FSCompat:
         def __init__(self, w, d):
