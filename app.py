@@ -326,11 +326,51 @@ else:
         perc_peso = int((peso_attuale / dati_mezzo_effettivo['Portata']) * 100) if dati_mezzo_effettivo['Portata'] else 0
         perc_spazio = int((area_occupata / area_totale) * 100) if area_totale else 0
         
-        epal_residui = 0
-        for space in spazi_liberi:
-            epal_dritti = math.floor(space.w / 120) * math.floor(space.d / 80)
-            epal_girati = math.floor(space.w / 80) * math.floor(space.d / 120)
-            epal_residui += max(epal_dritti, epal_girati)
+        # --- NUOVO CALCOLO EPAL RESIDUI CON GRIGLIA (Evita sovrastima da sovrapposizione) ---
+        def calcola_epal_certi(l_camion, p_camion, blocchi):
+            gl = int(l_camion // 10)
+            gw = int(p_camion // 10)
+            
+            def simula_griglia(ruota_prima):
+                grid = [[0 for _ in range(gw)] for _ in range(gl)]
+                # 1. Disegna i blocchi attuali sulla griglia
+                for b in blocchi:
+                    sx, ex = int(b['x'] // 10), int(math.ceil((b['x'] + b['l']) / 10))
+                    sy, ey = int(b['y'] // 10), int(math.ceil((b['y'] + b['p']) / 10))
+                    for i in range(max(0, sx), min(gl, ex)):
+                        for j in range(max(0, sy), min(gw, ey)):
+                            grid[i][j] = 1
+                
+                count = 0
+                # Definisci le priorità (dritto o ruotato)
+                shapes = [(8, 12), (12, 8)] if ruota_prima else [(12, 8), (8, 12)]
+                
+                # 2. Cerca spazi per EPAL
+                for dim_x, dim_y in shapes:
+                    for i in range(gl - dim_x + 1):
+                        for j in range(gw - dim_y + 1):
+                            # Controlla se l'area è libera
+                            is_empty = True
+                            for dx in range(dim_x):
+                                for dy in range(dim_y):
+                                    if grid[i+dx][j+dy] == 1:
+                                        is_empty = False
+                                        break
+                                if not is_empty: break
+                            
+                            # Se libera, "piazza" l'EPAL virtuale
+                            if is_empty:
+                                count += 1
+                                for dx in range(dim_x):
+                                    for dy in range(dim_y):
+                                        grid[i+dx][j+dy] = 1
+                return count
+
+            # Testa sia la disposizione dritta che ruotata e prende la migliore
+            return max(simula_griglia(False), simula_griglia(True))
+            
+        epal_residui = calcola_epal_certi(dati_mezzo_effettivo['Lunghezza'], dati_mezzo_effettivo['Larghezza'], blocchi_piazzati)
+        # ----------------------------------------------------------------------------------
         
         c1, c2, c3 = st.columns(3)
         c1.metric("Saturazione Peso", f"{perc_peso}%", f"{dati_mezzo_effettivo['Portata'] - peso_attuale} kg liberi", delta_color="normal")
