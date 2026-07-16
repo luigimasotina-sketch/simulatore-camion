@@ -5,7 +5,6 @@ import math
 
 st.set_page_config(page_title="Simulatore di Carico Aziendale", layout="wide")
 
-# Ingrandiamo i menu a tendina e compattiamo la vista
 st.markdown("""
 <style>
     .stSelectbox label { font-size: 1.2rem; font-weight: bold; }
@@ -15,7 +14,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# Inizializzazione della variabile dei log per evitare l'errore al riavvio
 if 'log_messaggi' not in st.session_state:
     st.session_state.log_messaggi = []
 
@@ -95,7 +93,6 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
         free_rectangles = [Rect(0, 0, mezzo['Lunghezza'], mezzo['Larghezza'])]
         placed_blocks = []
         qta_totale_inserita = 0
-        max_x = 0
         
         items_copia = [{'dati': i['dati'], 'qta': i['qta']} for i in items_da_caricare]
         
@@ -107,9 +104,10 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 best_rect_idx = -1
                 best_l, best_p = dati['L'], dati['P']
                 
-                # Punteggio "Bottom-Left" puro: 
-                # Coordinata X prioritaria (spinge verso la testata del camion), 
-                # Coordinata Y secondaria (allinea i pallet creando colonne).
+                # La logica Pura Bottom-Left:
+                # Il punteggio è (X, Y). Vince chi sta più in basso a sinistra.
+                # Se due orientamenti entrano nello STESSO esatto punto (es. 0,0),
+                # la 'penalita' decide quale dei due preferire per questo Pass.
                 best_score = (float('inf'), float('inf'), float('inf')) 
                 
                 for i, rect in enumerate(free_rectangles):
@@ -132,7 +130,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                             best_l, best_p = dati['P'], dati['L']
                 
                 if best_rect_idx == -1:
-                    break # Nessuno spazio residuo trovato
+                    break # Spazio finito per questo oggetto
                     
                 selected_rect = free_rectangles[best_rect_idx]
                 
@@ -153,10 +151,8 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 
                 qta_rimasta -= qta_impilabile
                 qta_totale_inserita += qta_impilabile
-                if new_block.x + new_block.w > max_x:
-                    max_x = new_block.x + new_block.w
                 
-                # Taglio degli spazi (Maximal Rectangles)
+                # Taglio degli spazi residui (Guillotine)
                 new_free_rectangles = []
                 for rect in free_rectangles:
                     if not rect.intersects(new_block):
@@ -184,26 +180,22 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                         
                 free_rectangles = final_free_rectangles
 
-        return qta_totale_inserita, max_x, placed_blocks, free_rectangles
+        return qta_totale_inserita, placed_blocks, free_rectangles
 
-    # Eseguiamo due simulazioni: una che preferisce i pallet dritti, una i ruotati
-    qta1, mx1, blocks1, free1 = simula_pass(items, preferisci_ruotato=False)
-    qta2, mx2, blocks2, free2 = simula_pass(items, preferisci_ruotato=True) 
+    # Simuliamo forzando l'ordine standard (Dritto) - Ideale per Bilico 33 plt
+    qta1, blocks1, free1 = simula_pass(items, preferisci_ruotato=False)
+    # Simuliamo forzando l'ordine ruotato - Ideale per Incastri Daily
+    qta2, blocks2, free2 = simula_pass(items, preferisci_ruotato=True) 
 
     qta_richiesta_totale = sum(i['qta'] for i in items)
     ok1 = (qta1 == qta_richiesta_totale)
     ok2 = (qta2 == qta_richiesta_totale)
     
-    # Sceglie il risultato che carica di più. A parità di carico, sceglie quello che occupa meno lunghezza
-    if qta1 > qta2:
-        best_pass = 1
-    elif qta2 > qta1:
+    # Sceglie la strategia che ha caricato più pezzi. A parità, vince la 1 (Standard/Dritto).
+    if qta2 > qta1:
         best_pass = 2
     else:
-        if mx1 <= mx2:
-            best_pass = 1
-        else:
-            best_pass = 2
+        best_pass = 1
             
     class FSCompat:
         def __init__(self, w, d):
