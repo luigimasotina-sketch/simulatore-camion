@@ -44,8 +44,6 @@ if 'oggetti' not in st.session_state:
         {"Nome": "KM 130 a vista", "L": 218, "P": 150, "A": 170, "Peso": 955, "Sovrapponibile": False, "Ruotabile": False},
         {"Nome": "KM 150 Pallet", "L": 254, "P": 172, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": True},
         {"Nome": "KM 150 a vista", "L": 254, "P": 172, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": False},
-        {"Nome": "KM 160 Pallet", "L": 226, "P": 140, "A": 167, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": True},
-        {"Nome": "KM 160 a vista", "L": 226, "P": 140, "A": 167, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": False},
         {"Nome": "KM 170 Pallet", "L": 265, "P": 193, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": True},
         {"Nome": "KM 170 a vista", "L": 265, "P": 193, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": False},
         {"Nome": "B300 Pallet", "L": 249, "P": 157, "A": 186, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
@@ -132,20 +130,13 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
     max_packed_count = -1
     best_length = float('inf')
 
-    # IL FRULLATORE (1000 tentativi: aumentati per esplorare più combinazioni in ~0.3s)
-    for tentativo in range(1000):
-        random.seed(tentativo)
-        
-        current_stacks = list(stacks_da_piazzare)
-        # Ogni tanto mescola leggermente l'ordine per sbloccare incastri strani
-        if tentativo > 20:
-            current_stacks.sort(key=lambda x: (x['L'] * x['P']) + random.randint(-2000, 2000), reverse=True)
-
+    # --- SOTTOFUNZIONE: Esegue un singolo tentativo pulito ---
+    def esegui_tentativo(stacks, strategia_rotazione):
         placed = []
         free_rects = [Rect(0, 0, mezzo['Lunghezza'], mezzo['Larghezza'])]
         success = True
 
-        for stack in current_stacks:
+        for stack in stacks:
             best_score = (float('inf'), float('inf'))
             best_pos = None
             best_dim = None
@@ -155,16 +146,15 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
             if stack['Ruotabile'] and stack['L'] != stack['P']:
                 orientations.append((stack['P'], stack['L']))
 
-            # Mescolamento statistiche di rotazione (Dritto, Girato, Random)
-            if tentativo % 3 == 1:
+            if strategia_rotazione == 'girato':
                 orientations.reverse()
-            elif tentativo > 10 and random.choice([True, False]):
+            elif strategia_rotazione == 'random' and random.choice([True, False]):
                 orientations.reverse()
 
             for w, d in orientations:
                 for i, rect in enumerate(free_rects):
                     if rect.w >= w and rect.d >= d:
-                        # Punteggio di posizionamento: cerca di stare in basso e a sinistra
+                        # Punteggio: Bottom-Left rule
                         score = (rect.x, rect.y)
                         if score < best_score:
                             best_score = score
@@ -186,8 +176,15 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
             else:
                 success = False
                 break
+        return placed, free_rects
 
-        # Valutazione del tentativo attuale
+    # =========================================================
+    # FASE 1: FAST PATH (Algoritmo logico istantaneo)
+    # =========================================================
+    # Proviamo le 2 combinazioni classiche: tutti dritti, poi tutti girati
+    for strategia in ['dritto', 'girato']:
+        placed, free_rects = esegui_tentativo(stacks_da_piazzare, strategia)
+        
         if len(placed) > max_packed_count:
             max_packed_count = len(placed)
             best_placed = placed
@@ -196,20 +193,49 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 best_length = max(b['x'] + b['l'] for b in placed)
         elif len(placed) == max_packed_count and len(placed) > 0:
             current_length = max(b['x'] + b['l'] for b in placed)
-            # A parità di pezzi inseriti, vince chi occupa meno lunghezza
             if current_length < best_length:
                 best_length = current_length
                 best_placed = placed
                 best_free = free_rects
 
-        # Se riesce a caricare tutto, esce in anticipo (super veloce!)
-        if max_packed_count == len(stacks_da_piazzare):
-            # Aspetta, magari c'è un incastro che occupa ancora meno spazio? 
-            # Continua per qualche ciclo se siamo nei primi, altrimenti accetta.
-            if tentativo > 50: 
-                break
-
+    # Se la Fase 1 ha caricato tutto con successo, USCIAMO SUBITO! (0 millisecondi)
     is_total_success = (max_packed_count == len(stacks_da_piazzare))
+    if is_total_success:
+        return True, best_placed, best_free
+
+    # =========================================================
+    # FASE 2: RESCUE PATH (Monte Carlo - 2000 Tentativi)
+    # =========================================================
+    # La logica standard sta per dire "Non ci sta".
+    # Scateniamo 2000 prove brute mescolando rotazioni e ordini per trovare il miracolo.
+    for tentativo in range(2000):
+        random.seed(tentativo)
+        current_stacks = list(stacks_da_piazzare)
+        
+        # Ogni tanto diamo una scossa all'ordine di caricamento
+        if tentativo > 50:
+            current_stacks.sort(key=lambda x: (x['L'] * x['P']) + random.randint(-2500, 2500), reverse=True)
+            
+        placed, free_rects = esegui_tentativo(current_stacks, 'random')
+
+        if len(placed) > max_packed_count:
+            max_packed_count = len(placed)
+            best_placed = placed
+            best_free = free_rects
+            if len(placed) > 0:
+                best_length = max(b['x'] + b['l'] for b in placed)
+        elif len(placed) == max_packed_count and len(placed) > 0:
+            current_length = max(b['x'] + b['l'] for b in placed)
+            if current_length < best_length:
+                best_length = current_length
+                best_placed = placed
+                best_free = free_rects
+
+        # Se il frullatore trova un modo miracoloso per far entrare tutto, ferma il ciclo ed esci!
+        if max_packed_count == len(stacks_da_piazzare):
+            is_total_success = True
+            break
+
     return is_total_success, best_placed, best_free
 
 def stima_epal_residui(free_rectangles_iniziali):
@@ -381,7 +407,7 @@ else:
         c2.metric("Saturazione Pianale", f"{perc_spazio}%", f"{(area_totale - area_occupata):.1f} m² liberi", delta_color="normal")
         c3.metric("Spazi EPAL Certi", f"{epal_residui} plt", "Basato su incastri reali")
         
-        st.markdown(f"**Spazio lineare residuo a fondo camion:** `<span style='color:#00CC96; font-size:1.2rem; font-weight:bold;'>{int(cm_restanti)} cm</span>`", unsafe_allow_html=True)
+        st.markdown(f"**Spazio lineare residuo a fondo camion:** <span style='color:#00CC96; font-size:1.2rem; font-weight:bold;'>{int(cm_restanti)} cm</span>", unsafe_allow_html=True)
         
         st.progress(min(perc_peso, 100), text="Grafico Peso")
         st.progress(min(perc_spazio, 100), text="Grafico Spazio")
