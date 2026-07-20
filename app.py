@@ -44,6 +44,8 @@ if 'oggetti' not in st.session_state:
         {"Nome": "KM 130 a vista", "L": 218, "P": 150, "A": 170, "Peso": 955, "Sovrapponibile": False, "Ruotabile": False},
         {"Nome": "KM 150 Pallet", "L": 254, "P": 172, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": True},
         {"Nome": "KM 150 a vista", "L": 254, "P": 172, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": False},
+        {"Nome": "KM 160 Pallet", "L": 226, "P": 140, "A": 167, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": True},
+        {"Nome": "KM 160 a vista", "L": 226, "P": 140, "A": 167, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": False},
         {"Nome": "KM 170 Pallet", "L": 265, "P": 193, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": True},
         {"Nome": "KM 170 a vista", "L": 265, "P": 193, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": False},
         {"Nome": "B300 Pallet", "L": 249, "P": 157, "A": 186, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True},
