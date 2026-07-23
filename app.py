@@ -22,20 +22,16 @@ st.markdown("""
 if 'log_messaggi' not in st.session_state:
     st.session_state.log_messaggi = []
 
-# Sostituisci questo URL con il link CSV che ottieni da File -> Condividi -> Pubblica sul Web (Formato CSV)
-# Esempio: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ.../pub?gid=0&single=true&output=csv"
-GOOGLE_SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSr0tNyiDkPywA93FffiOSoD1Q07zMrgXpLXwM9ftn3DKH8DsHu9ySZN-26KPzhkduuwdUFxfpWXHQg/pub?gid=1792566437&single=true&output=csv"
-
+# Sostituisci questo URL con il link CSV 
+GOOGLE_SHEETS_CSV_URL = "" 
 
 @st.cache_data(ttl=60) # Ricarica i dati ogni 60 secondi
 def carica_anagrafica_google(url):
     if url == "INSERISCI_QUI_IL_TUO_LINK_CSV_PUBBLICATO":
-        # Se non c'è ancora l'URL, usiamo i dati di default o un dataframe vuoto
         return pd.DataFrame()
     try:
         df = pd.read_csv(url)
         # Rinominiamo le colonne per assicurarci che corrispondano alla logica interna
-        # Mappiamo i nomi che hai usato nello screenshot (image_1666d8.png)
         rename_map = {
             'Descrizione': 'Nome',
             'L (cm)': 'L',
@@ -59,7 +55,11 @@ def carica_anagrafica_google(url):
                 
         return df
     except Exception as e:
-        st.error(f"Errore nel caricamento del Foglio Google: {e}")
+        errore_str = str(e)
+        if "401" in errore_str or "Unauthorized" in errore_str:
+            st.error("🔒 Errore 401: Il Foglio Google è privato. Usa 'File -> Pubblica sul Web' oppure cambia le impostazioni di condivisione su 'Chiunque abbia il link'.")
+        else:
+            st.error(f"Errore nel caricamento del Foglio Google: {e}")
         return pd.DataFrame()
 
 if 'mezzi' not in st.session_state:
@@ -83,7 +83,7 @@ if st.session_state.oggetti_google.empty:
             {"Categoria": "Spedizioni", "Nome": "Gabbia", "L": 120, "P": 100, "A": 110, "Peso": 150, "Sovrapponibile": True, "Ruotabile": True, "NonAffiancabile": False},
             {"Categoria": "Spedizioni", "Nome": "Pallet EPAL Standard", "L": 120, "P": 80, "A": 30, "Peso": 25, "Sovrapponibile": True, "Ruotabile": True, "NonAffiancabile": False},
             {"Categoria": "Spedizioni", "Nome": "KM 120 Pallet", "L": 219, "P": 138, "A": 170, "Peso": 880, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
-            {"Categoria": "Trasferimenti", "Nome": "B260", "L": 234, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+            {"Categoria": "Trasferimenti Interni", "Nome": "B260", "L": 234, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
         ])
 else:
     st.session_state.oggetti = st.session_state.oggetti_google
@@ -160,7 +160,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
             })
             qta_rimasta -= qta_in_questo_stack
 
-    # Ordine base INTELLIGENTE: dal più ingombrante al più piccolo
+    # Ordine base INTELLIGENTE
     stacks_da_piazzare.sort(key=lambda x: x['L'] * x['P'], reverse=True)
 
     best_placed = []
@@ -168,7 +168,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
     max_packed_count = -1
     best_length = float('inf')
 
-    # --- SOTTOFUNZIONE: Esegue un singolo tentativo pulito ---
+    # --- SOTTOFUNZIONE: Esegue un singolo tentativo ---
     def esegui_tentativo(stacks, strategia_rotazione):
         placed = []
         free_rects = [Rect(0, 0, mezzo['Lunghezza'], mezzo['Larghezza'])]
@@ -181,7 +181,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
             best_rect_idx = -1
             is_virtual_full_width = False
 
-            orientations = [(stack['L'], stack['P'], False)] # (Width, Depth, is_rotated)
+            orientations = [(stack['L'], stack['P'], False)]
             if stack['Ruotabile'] and stack['L'] != stack['P']:
                 orientations.append((stack['P'], stack['L'], True))
 
@@ -191,28 +191,21 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 orientations.reverse()
 
             for w, d, is_rot in orientations:
-                
-                # Applica logica "Non Affiancabile se di punta"
-                # "Di punta" significa che il lato più lungo (L) è parallelo alla lunghezza (X) del camion.
-                # Se w == stack['L'], è di punta. Se w == stack['P'], è ruotato.
-                
-                # Se è NON affiancabile, ED è stato piazzato di punta (cioè w == stack['L'] e stack['L'] > stack['P'])
-                # Allora diciamo al sistema che questo oggetto occupa virtualmente tutta la larghezza del camion.
                 virtual_d = d
                 occupies_full_width = False
                 
+                # Applica logica "Non Affiancabile se di punta"
                 if stack['NonAffiancabile'] and (w == stack['L'] or stack['L'] == stack['P']):
-                    virtual_d = mezzo['Larghezza'] # Occupa tutta la larghezza virtualmente
+                    virtual_d = mezzo['Larghezza']
                     occupies_full_width = True
 
                 for i, rect in enumerate(free_rects):
                     if rect.w >= w and rect.d >= virtual_d:
-                        # Punteggio: Bottom-Left rule
                         score = (rect.x, rect.y)
                         if score < best_score:
                             best_score = score
                             best_pos = (rect.x, rect.y)
-                            best_dim = (w, d) # Salviamo le dimensioni REALI
+                            best_dim = (w, d)
                             best_rect_idx = i
                             is_virtual_full_width = occupies_full_width
 
@@ -220,14 +213,9 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 w, d = best_dim
                 sel_rect = free_rects[best_rect_idx]
                 
-                # Se occupa tutta la larghezza, il blocco che sottraiamo allo spazio è largo quanto il camion.
-                # Ma per disegnarlo lo centriamo.
                 if is_virtual_full_width:
-                    # Sottrae spazio virtuale
                     blocking_rect = Rect(sel_rect.x, 0, w, mezzo['Larghezza']) 
                     free_rects = aggiorna_rettangoli(free_rects, blocking_rect)
-                    
-                    # Graficamente lo disegniamo centrato
                     draw_y = (mezzo['Larghezza'] - d) / 2
                     placed.append({
                         'Nome': stack['Nome'],
@@ -236,7 +224,6 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                         'qta_stack': stack['qta_stack']
                     })
                 else:
-                    # Inserimento normale
                     new_block = Rect(sel_rect.x, sel_rect.y, w, d)
                     free_rects = aggiorna_rettangoli(free_rects, new_block)
                     placed.append({
@@ -250,12 +237,9 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 break
         return placed, free_rects
 
-    # =========================================================
-    # FASE 1: FAST PATH (Algoritmo logico istantaneo)
-    # =========================================================
+    # FASE 1: FAST PATH
     for strategia in ['dritto', 'girato']:
         placed, free_rects = esegui_tentativo(stacks_da_piazzare, strategia)
-        
         if len(placed) > max_packed_count:
             max_packed_count = len(placed)
             best_placed = placed
@@ -269,16 +253,12 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 best_placed = placed
                 best_free = free_rects
 
-    # =========================================================
-    # FASE 2: RESCUE PATH (Monte Carlo - Solo se fallisce la fase 1)
-    # =========================================================
+    # FASE 2: RESCUE PATH (Solo se Fase 1 fallisce)
     is_total_success = (max_packed_count == len(stacks_da_piazzare))
     
     if not is_total_success:
-        for tentativo in range(2000):
+        for tentativo in range(1000):
             current_stacks = list(stacks_da_piazzare)
-            
-            # Leggero rimescolamento mantenendo l'ordine generale di grandezza
             current_stacks.sort(key=lambda x: (x['L'] * x['P']) + random.randint(-1500, 1500), reverse=True)
                 
             placed, free_rects = esegui_tentativo(current_stacks, 'random')
@@ -357,17 +337,13 @@ categoria_selezionata = st.sidebar.radio(
     ["Spedizioni", "Trasferimenti Interni"]
 )
 
-# Filtro oggetti in base alla categoria
 if 'Categoria' in st.session_state.oggetti.columns:
-    # Se per caso usi "Trasferimenti" invece di "Trasferimenti Interni" nel DB, proviamo a prenderli entrambi
     if categoria_selezionata == "Trasferimenti Interni":
         oggetti_filtrati = st.session_state.oggetti[st.session_state.oggetti['Categoria'].str.contains("Trasferiment", case=False, na=False)]
     else:
         oggetti_filtrati = st.session_state.oggetti[st.session_state.oggetti['Categoria'].str.contains("Spedizion", case=False, na=False)]
 else:
-    # Fallback se la colonna non esiste
     oggetti_filtrati = st.session_state.oggetti
-
 
 st.title("🚛 Simulatore di Carico Aziendale")
 
@@ -392,12 +368,11 @@ with col_sx:
     st.subheader(f"2. Aggiungi Merce ({categoria_selezionata})")
     
     lista_oggetti = oggetti_filtrati.to_dict('records')
-    # Protezione nel caso in cui un oggetto non abbia il campo NonAffiancabile
     for o in lista_oggetti:
         if 'NonAffiancabile' not in o:
             o['NonAffiancabile'] = False
             
-    opzioni_menu = ["Oggetto non in anagrafica"] + [f"{o['Nome']} ({o['L']}x{o['P']}x{o['A']}cm | {o['Peso']}kg)" for o in lista_oggetti]
+    opzioni_menu = ["Oggetto non in anagrafica"] + [f"{o['Nome']} ({o.get('L',0)}x{o.get('P',0)}x{o.get('A',0)}cm | {o.get('Peso',0)}kg)" for o in lista_oggetti]
     
     scelta_oggetto = st.selectbox("Seleziona Oggetto:", opzioni_menu)
     
@@ -417,15 +392,15 @@ with col_sx:
         idx = opzioni_menu.index(scelta_oggetto) - 1
         ogg_selezionato = lista_oggetti[idx]
         nome_da_aggiungere = ogg_selezionato['Nome']
-        L, P, A = ogg_selezionato['L'], ogg_selezionato['P'], ogg_selezionato['A']
-        Peso = ogg_selezionato['Peso']
+        L, P, A = ogg_selezionato.get('L',0), ogg_selezionato.get('P',0), ogg_selezionato.get('A',0)
+        Peso = ogg_selezionato.get('Peso',0)
         sovr = ogg_selezionato.get('Sovrapponibile', False)
         ruot = ogg_selezionato.get('Ruotabile', True)
         non_aff = ogg_selezionato.get('NonAffiancabile', False)
         st.write(f"**Dimensioni:** {L}x{P}x{A}cm - **Peso:** {Peso}kg")
         st.write(f"{'✔️' if sovr else '❌'} Sovrapponibile | {'✔️' if ruot else '❌'} Ruotabile")
         if non_aff:
-            st.warning("⚠️ Questa macchina non permette affiancamento se caricata di punta.")
+            st.warning("⚠️ Questo oggetto non permette affiancamento se caricato di punta.")
 
     quantita = st.number_input("Quantità da inserire", min_value=1, value=1)
     
@@ -479,11 +454,9 @@ with col_dx:
     perc_peso = int((peso_attuale / dati_mezzo_effettivo['Portata']) * 100) if dati_mezzo_effettivo['Portata'] else 0
     perc_spazio = int((area_occupata / area_totale) * 100) if area_totale else 0
     
-    # Calcolo Esatto CM restanti
     max_x_raggiunto = max([b['x'] + b['l'] for b in blocchi_piazzati], default=0)
     cm_restanti = max(0, dati_mezzo_effettivo['Lunghezza'] - max_x_raggiunto)
     
-    # Stima EPAL Realistica tramite griglia virtuale
     epal_residui = stima_epal_residui(spazi_liberi)
     
     c1, c2, c3 = st.columns(3)
