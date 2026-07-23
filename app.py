@@ -23,12 +23,14 @@ if 'log_messaggi' not in st.session_state:
     st.session_state.log_messaggi = []
 
 # Sostituisci questo URL con il link CSV 
-GOOGLE_SHEETS_CSV_URL = "" 
+GOOGLE_SHEETS_CSV_URL = "GOOGLE_SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSr0tNyiDkPywA93FffiOSoD1Q07zMrgXpLXwM9ftn3DKH8DsHu9ySZN-26KPzhkduuwdUFxfpWXHQg/pub?gid=1792566437&single=true&output=csv" 
 
 @st.cache_data(ttl=60) # Ricarica i dati ogni 60 secondi
+
 def carica_anagrafica_google(url):
-    if url == "https://docs.google.com/spreadsheets/d/e/2PACX-1vSr0tNyiDkPywA93FffiOSoD1Q07zMrgXpLXwM9ftn3DKH8DsHu9ySZN-26KPzhkduuwdUFxfpWXHQg/pub?gid=1792566437&single=true&output=csv":
-        return pd.DataFrame()
+        if url == "INSERISCI_QUI_IL_TUO_LINK_CSV_PUBBLICATO":
+            return pd.DataFrame()
+       
     try:
         df = pd.read_csv(url)
         # Rinominiamo le colonne per assicurarci che corrispondano alla logica interna
