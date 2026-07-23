@@ -30,7 +30,7 @@ GOOGLE_SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSr0tNy
 def carica_anagrafica_google(url):
         if url == "INSERISCI_QUI_IL_TUO_LINK_CSV_PUBBLICATO":
             return pd.DataFrame()
-    try:
+try:
         df = pd.read_csv(url)
         # Rinominiamo le colonne per assicurarci che corrispondano alla logica interna
         rename_map = {
