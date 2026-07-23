@@ -22,15 +22,12 @@ st.markdown("""
 if 'log_messaggi' not in st.session_state:
     st.session_state.log_messaggi = []
 
-# Sostituisci questo URL con il link CSV 
+# ECCO IL TUO LINK INSERITO CORRETTAMENTE
 GOOGLE_SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSr0tNyiDkPywA93FffiOSoD1Q07zMrgXpLXwM9ftn3DKH8DsHu9ySZN-26KPzhkduuwdUFxfpWXHQg/pub?gid=1792566437&single=true&output=csv" 
 
 @st.cache_data(ttl=60) # Ricarica i dati ogni 60 secondi
-
 def carica_anagrafica_google(url):
-        if url == "INSERISCI_QUI_IL_TUO_LINK_CSV_PUBBLICATO":
-            return pd.DataFrame()
-try:
+    try:
         df = pd.read_csv(url)
         # Rinominiamo le colonne per assicurarci che corrispondano alla logica interna
         rename_map = {
@@ -77,8 +74,9 @@ if 'mezzi' not in st.session_state:
 # Carica gli oggetti all'avvio
 st.session_state.oggetti_google = carica_anagrafica_google(GOOGLE_SHEETS_CSV_URL)
 
-# Fallback se il foglio non è ancora collegato (per test)
+# Fallback in caso di problemi di caricamento
 if st.session_state.oggetti_google.empty:
+    st.warning("⚠️ Impossibile caricare il Foglio Google. Sto usando i dati di esempio locali.")
     if 'oggetti' not in st.session_state:
         st.session_state.oggetti = pd.DataFrame([
             {"Categoria": "Spedizioni", "Nome": "Gabbia", "L": 120, "P": 100, "A": 110, "Peso": 150, "Sovrapponibile": True, "Ruotabile": True, "NonAffiancabile": False},
@@ -148,7 +146,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
         qta_rimasta = item['qta']
         qta_impilabile = 1
         if dati.get('Sovrapponibile', False):
-            qta_impilabile = max(1, math.floor(mezzo['Altezza'] / dati['A']))
+            qta_impilabile = max(1, math.floor(mezzo['Altezza'] / max(1, dati['A'])))
             
         while qta_rimasta > 0:
             qta_in_questo_stack = min(qta_rimasta, qta_impilabile)
@@ -238,7 +236,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 break
         return placed, free_rects
 
-    # FASE 1: FAST PATH
+    # FASE 1: FAST PATH (Istantaneo)
     for strategia in ['dritto', 'girato']:
         placed, free_rects = esegui_tentativo(stacks_da_piazzare, strategia)
         if len(placed) > max_packed_count:
@@ -254,7 +252,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 best_placed = placed
                 best_free = free_rects
 
-    # FASE 2: RESCUE PATH (Solo se Fase 1 fallisce)
+    # FASE 2: RESCUE PATH (Forza Bruta, entra in azione solo se necessario)
     is_total_success = (max_packed_count == len(stacks_da_piazzare))
     
     if not is_total_success:
