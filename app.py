@@ -27,7 +27,7 @@ GOOGLE_SHEETS_CSV_URL = ""
 
 @st.cache_data(ttl=60) # Ricarica i dati ogni 60 secondi
 def carica_anagrafica_google(url):
-    if url == "INSERISCI_QUI_IL_TUO_LINK_CSV_PUBBLICATO":
+    if url == "https://docs.google.com/spreadsheets/d/e/2PACX-1vSr0tNyiDkPywA93FffiOSoD1Q07zMrgXpLXwM9ftn3DKH8DsHu9ySZN-26KPzhkduuwdUFxfpWXHQg/pub?gid=1792566437&single=true&output=csv":
         return pd.DataFrame()
     try:
         df = pd.read_csv(url)
