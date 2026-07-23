@@ -24,7 +24,7 @@ if 'log_messaggi' not in st.session_state:
 
 # Sostituisci questo URL con il link CSV che ottieni da File -> Condividi -> Pubblica sul Web (Formato CSV)
 # Esempio: "https://docs.google.com/spreadsheets/d/e/2PACX-1vQ.../pub?gid=0&single=true&output=csv"
-GOOGLE_SHEETS_CSV_URL = https://docs.google.com/spreadsheets/d/e/2PACX-1vSr0tNyiDkPywA93FffiOSoD1Q07zMrgXpLXwM9ftn3DKH8DsHu9ySZN-26KPzhkduuwdUFxfpWXHQg/pub?gid=1792566437&single=true&output=csv
+GOOGLE_SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSr0tNyiDkPywA93FffiOSoD1Q07zMrgXpLXwM9ftn3DKH8DsHu9ySZN-26KPzhkduuwdUFxfpWXHQg/pub?gid=1792566437&single=true&output=csv"
 
 
 @st.cache_data(ttl=60) # Ricarica i dati ogni 60 secondi
