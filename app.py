@@ -14,51 +14,12 @@ st.markdown("""
     div[data-baseweb="select"] > div { font-size: 1.1rem; }
     .stNumberInput label { font-size: 1.1rem; }
     .stAlert { font-size: 1.1rem; }
-    /* Nascondi temporaneamente la vecchia pagina di gestione per non fare confusione */
     [data-testid="stSidebarNav"] {display: none;} 
 </style>
 """, unsafe_allow_html=True)
 
 if 'log_messaggi' not in st.session_state:
     st.session_state.log_messaggi = []
-
-# ECCO IL TUO LINK INSERITO CORRETTAMENTE
-GOOGLE_SHEETS_CSV_URL = "https://docs.google.com/spreadsheets/d/e/2PACX-1vSr0tNyiDkPywA93FffiOSoD1Q07zMrgXpLXwM9ftn3DKH8DsHu9ySZN-26KPzhkduuwdUFxfpWXHQg/pub?gid=1792566437&single=true&output=csv" 
-
-@st.cache_data(ttl=60) # Ricarica i dati ogni 60 secondi
-def carica_anagrafica_google(url):
-    try:
-        df = pd.read_csv(url)
-        # Rinominiamo le colonne per assicurarci che corrispondano alla logica interna
-        rename_map = {
-            'Descrizione': 'Nome',
-            'L (cm)': 'L',
-            'P (cm)': 'P',
-            'A (cm)': 'A',
-            'Non affincabile se di punta': 'NonAffiancabile'
-        }
-        df.rename(columns=rename_map, inplace=True)
-        
-        # Gestiamo i boolean (Vero/Falso in italiano)
-        for col in ['Sovrapponibile', 'Ruotabile', 'NonAffiancabile']:
-            if col in df.columns:
-                df[col] = df[col].astype(str).str.strip().str.lower()
-                df[col] = df[col].map({'vero': True, 'falso': False, 'true': True, 'false': False, 'v': True, 'f': False})
-                df[col] = df[col].fillna(False) # Default a False
-        
-        # Pulizia numeri
-        for col in ['L', 'P', 'A', 'Peso']:
-            if col in df.columns:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(0).astype(int)
-                
-        return df
-    except Exception as e:
-        errore_str = str(e)
-        if "401" in errore_str or "Unauthorized" in errore_str:
-            st.error("🔒 Errore 401: Il Foglio Google è privato. Usa 'File -> Pubblica sul Web' oppure cambia le impostazioni di condivisione su 'Chiunque abbia il link'.")
-        else:
-            st.error(f"Errore nel caricamento del Foglio Google: {e}")
-        return pd.DataFrame()
 
 if 'mezzi' not in st.session_state:
     st.session_state.mezzi = pd.DataFrame([
@@ -71,22 +32,73 @@ if 'mezzi' not in st.session_state:
         {"Nome": "Container 40 piedi HC", "Lunghezza": 1203, "Larghezza": 235, "Altezza": 269, "Portata": 24000}
     ])
 
-# Carica gli oggetti all'avvio
-st.session_state.oggetti_google = carica_anagrafica_google(GOOGLE_SHEETS_CSV_URL)
+# ---- DATABASE ANAGRAFICA SCOLPITO NEL CODICE ----
+# Aggiungi o modifica gli oggetti qui sotto per aggiornare l'app.
+if 'oggetti' not in st.session_state:
+    st.session_state.oggetti = pd.DataFrame([
+        # --- SPEDIZIONI ---
+        {"Categoria": "Spedizioni", "Nome": "Pallet Standard", "L": 120, "P": 80, "A": 150, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Spedizioni", "Nome": "KM 105 Pallet", "L": 203, "P": 117, "A": 156, "Peso": 560, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 105 a vista", "L": 203, "P": 117, "A": 156, "Peso": 560, "Sovrapponibile": False, "Ruotabile": False, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 110 Pallet", "L": 161, "P": 97, "A": 141, "Peso": 560, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Spedizioni", "Nome": "KM 110 a vista", "L": 203, "P": 117, "A": 156, "Peso": 560, "Sovrapponibile": False, "Ruotabile": False, "NonAffiancabile": False},
+        {"Categoria": "Spedizioni", "Nome": "KM 120 Pallet", "L": 219, "P": 138, "A": 170, "Peso": 880, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 120 a vista", "L": 219, "P": 138, "A": 170, "Peso": 880, "Sovrapponibile": False, "Ruotabile": False, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 130 Pallet", "L": 203, "P": 117, "A": 156, "Peso": 955, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 130 a vista", "L": 203, "P": 117, "A": 156, "Peso": 955, "Sovrapponibile": False, "Ruotabile": False, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 150 Pallet", "L": 254, "P": 172, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 150 a vista", "L": 254, "P": 172, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": False, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 160 Pallet", "L": 226, "P": 140, "A": 167, "Peso": 1055, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 160 a vista", "L": 226, "P": 140, "A": 167, "Peso": 1055, "Sovrapponibile": False, "Ruotabile": False, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 170 Pallet", "L": 265, "P": 193, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 170 a vista", "L": 265, "P": 193, "A": 184, "Peso": 1374, "Sovrapponibile": False, "Ruotabile": False, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 180 Pallet", "L": 272, "P": 172, "A": 185, "Peso": 1564, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "KM 180 a vista", "L": 272, "P": 172, "A": 185, "Peso": 1564, "Sovrapponibile": False, "Ruotabile": False, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "B260", "L": 234, "P": 152, "A": 181, "Peso": 1000, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "B260 COMBO", "L": 325, "P": 152, "A": 181, "Peso": 1300, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "B300 Pallet", "L": 249, "P": 157, "A": 186, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
+        {"Categoria": "Spedizioni", "Nome": "B300 a vista", "L": 249, "P": 157, "A": 186, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": False, "NonAffiancabile": True},
 
-# Fallback in caso di problemi di caricamento
-if st.session_state.oggetti_google.empty:
-    st.warning("⚠️ Impossibile caricare il Foglio Google. Sto usando i dati di esempio locali.")
-    if 'oggetti' not in st.session_state:
-        st.session_state.oggetti = pd.DataFrame([
-            {"Categoria": "Spedizioni", "Nome": "Gabbia", "L": 120, "P": 100, "A": 110, "Peso": 150, "Sovrapponibile": True, "Ruotabile": True, "NonAffiancabile": False},
-            {"Categoria": "Spedizioni", "Nome": "Pallet EPAL Standard", "L": 120, "P": 80, "A": 30, "Peso": 25, "Sovrapponibile": True, "Ruotabile": True, "NonAffiancabile": False},
-            {"Categoria": "Spedizioni", "Nome": "KM 120 Pallet", "L": 219, "P": 138, "A": 170, "Peso": 880, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
-            {"Categoria": "Trasferimenti Interni", "Nome": "B260", "L": 234, "P": 152, "A": 181, "Peso": 1770, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": True},
-        ])
+        # --- TRASFERIMENTI INTERNI ---
+        {"Categoria": "Trasferimenti Interni", "Nome": "Pallet Standard", "L": 120, "P": 80, "A": 150, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Gabbia sovrapponibile", "L": 100, "P": 80, "A": 110, "Peso": 140, "Sovrapponibile": True, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Gabbia non sovrapponibile", "L": 100, "P": 80, "A": 150, "Peso": 160, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        # Nota: I campi originariamente vuoti sono inizializzati a 100 (default) per evitare blocchi dell'algoritmo.
+        {"Categoria": "Trasferimenti Interni", "Nome": "Telaio 110", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": True, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Telaio B260", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": True, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Telaio B300", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Contenitore B300", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Telaio 120/130", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Contenitore 120/130", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Telaio 150", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Contenitore 150", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Telaio 170", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Contenitore 170", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Contenitore per volate", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": False, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Porta-cofanature", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": True, "Ruotabile": True, "NonAffiancabile": False},
+        {"Categoria": "Trasferimenti Interni", "Nome": "Pallet lamiera", "L": 100, "P": 100, "A": 100, "Peso": 100, "Sovrapponibile": True, "Ruotabile": True, "NonAffiancabile": False}
+    ])
+
+# ---- SIDEBAR: NAVIGAZIONE E FILTRI ----
+st.sidebar.title("🚛 Navigazione")
+st.sidebar.markdown("**1. Database Articoli**")
+st.sidebar.info("L'anagrafica è integrata e sempre aggiornata. Non è necessario caricare file esterni.")
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("**2. Modalità operativa**")
+# Selettore Categoria
+categoria_selezionata = st.sidebar.radio(
+    "Scegli il contesto di carico:",
+    ["Spedizioni", "Trasferimenti Interni"]
+)
+
+if 'Categoria' in st.session_state.oggetti.columns:
+    if categoria_selezionata == "Trasferimenti Interni":
+        oggetti_filtrati = st.session_state.oggetti[st.session_state.oggetti['Categoria'].str.contains("Trasferiment", case=False, na=False)]
+    else:
+        oggetti_filtrati = st.session_state.oggetti[st.session_state.oggetti['Categoria'].str.contains("Spedizion", case=False, na=False)]
 else:
-    st.session_state.oggetti = st.session_state.oggetti_google
-
+    oggetti_filtrati = st.session_state.oggetti
 
 if 'carico' not in st.session_state:
     st.session_state.carico = []
@@ -159,15 +171,8 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
             })
             qta_rimasta -= qta_in_questo_stack
 
-    # Ordine base INTELLIGENTE
     stacks_da_piazzare.sort(key=lambda x: x['L'] * x['P'], reverse=True)
 
-    best_placed = []
-    best_free = []
-    max_packed_count = -1
-    best_length = float('inf')
-
-    # --- SOTTOFUNZIONE: Esegue un singolo tentativo ---
     def esegui_tentativo(stacks, strategia_rotazione):
         placed = []
         free_rects = [Rect(0, 0, mezzo['Lunghezza'], mezzo['Larghezza'])]
@@ -193,7 +198,7 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 virtual_d = d
                 occupies_full_width = False
                 
-                # Applica logica "Non Affiancabile se di punta"
+                # LOGICA "NON AFFIANCABILE SE DI PUNTA"
                 if stack['NonAffiancabile'] and (w == stack['L'] or stack['L'] == stack['P']):
                     virtual_d = mezzo['Larghezza']
                     occupies_full_width = True
@@ -236,7 +241,12 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 break
         return placed, free_rects
 
-    # FASE 1: FAST PATH (Istantaneo)
+    best_placed = []
+    best_free = []
+    max_packed_count = -1
+    best_length = float('inf')
+
+    # FASE 1: FAST PATH (Intelligente e Istantaneo)
     for strategia in ['dritto', 'girato']:
         placed, free_rects = esegui_tentativo(stacks_da_piazzare, strategia)
         if len(placed) > max_packed_count:
@@ -252,9 +262,9 @@ def simula_carico_completo(mezzo, carico_attuale, nuovo_oggetto=None, qta_nuovo=
                 best_placed = placed
                 best_free = free_rects
 
-    # FASE 2: RESCUE PATH (Forza Bruta, entra in azione solo se necessario)
     is_total_success = (max_packed_count == len(stacks_da_piazzare))
     
+    # FASE 2: RESCUE PATH (Forza Bruta Monte Carlo solo se fallisce)
     if not is_total_success:
         for tentativo in range(1000):
             current_stacks = list(stacks_da_piazzare)
@@ -326,24 +336,6 @@ def verifica_spazio(mezzo, carico_attuale, nuovo_oggetto, qta_richiesta):
                 return q, f"Spazio in esaurimento: trovata combinazione per caricare {q} pezzi su {qta_richiesta}."
     return 0, "Spazio o portata insufficiente. Impossibile incastrare altri pezzi."
 
-
-st.sidebar.title("🚛 Navigazione")
-st.sidebar.markdown("**Modalità operative:**")
-
-# Selettore Categoria
-categoria_selezionata = st.sidebar.radio(
-    "Scegli il contesto di carico:",
-    ["Spedizioni", "Trasferimenti Interni"]
-)
-
-if 'Categoria' in st.session_state.oggetti.columns:
-    if categoria_selezionata == "Trasferimenti Interni":
-        oggetti_filtrati = st.session_state.oggetti[st.session_state.oggetti['Categoria'].str.contains("Trasferiment", case=False, na=False)]
-    else:
-        oggetti_filtrati = st.session_state.oggetti[st.session_state.oggetti['Categoria'].str.contains("Spedizion", case=False, na=False)]
-else:
-    oggetti_filtrati = st.session_state.oggetti
-
 st.title("🚛 Simulatore di Carico Aziendale")
 
 nomi_mezzi = st.session_state.mezzi["Nome"].tolist()
@@ -371,7 +363,7 @@ with col_sx:
         if 'NonAffiancabile' not in o:
             o['NonAffiancabile'] = False
             
-    opzioni_menu = ["Oggetto non in anagrafica"] + [f"{o['Nome']} ({o.get('L',0)}x{o.get('P',0)}x{o.get('A',0)}cm | {o.get('Peso',0)}kg)" for o in lista_oggetti]
+    opzioni_menu = ["Oggetto non in anagrafica"] + [f"{o.get('Nome', 'Sconosciuto')} ({o.get('L',0)}x{o.get('P',0)}x{o.get('A',0)}cm | {o.get('Peso',0)}kg)" for o in lista_oggetti]
     
     scelta_oggetto = st.selectbox("Seleziona Oggetto:", opzioni_menu)
     
@@ -390,7 +382,7 @@ with col_sx:
     else:
         idx = opzioni_menu.index(scelta_oggetto) - 1
         ogg_selezionato = lista_oggetti[idx]
-        nome_da_aggiungere = ogg_selezionato['Nome']
+        nome_da_aggiungere = ogg_selezionato.get('Nome', 'Sconosciuto')
         L, P, A = ogg_selezionato.get('L',0), ogg_selezionato.get('P',0), ogg_selezionato.get('A',0)
         Peso = ogg_selezionato.get('Peso',0)
         sovr = ogg_selezionato.get('Sovrapponibile', False)
